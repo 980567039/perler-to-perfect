@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { PatternCanvas, type EditorTool } from './components/PatternCanvas';
 import { PalettePanel } from './components/PalettePanel';
 import { MAX_SOURCE_BYTES, MAX_SOURCE_PIXELS, type GenerateResponse } from './domain/types';
+import { MARD_STANDARD_221_PALETTE } from './domain/mardPalette';
 import { paletteFromFileContents } from './domain/palette';
 import { loadMostRecentProject, saveProject } from './persistence/database';
 import {
@@ -52,7 +53,7 @@ export function App() {
   const [isExporting, setIsExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState({ label: '', completed: 0, total: 1 });
   const [tileSize, setTileSize] = useState(50);
-  const [notice, setNotice] = useState('开发色板仅用于验证流程，请在生产前导入有授权的真实色板。');
+  const [notice, setNotice] = useState('已载入 MARD 标准 221 色；HEX 为屏幕近似值，实体颜色可能受光线和批次影响。');
   const [error, setError] = useState<string | null>(null);
   const generationTask = useRef<GenerationTask | null>(null);
 
@@ -399,7 +400,7 @@ export function App() {
               />
             </label>
             <label className="secondary-button file-button">
-              导入授权色板
+              导入自定义色板
               <input
                 type="file"
                 accept=".csv,.json,text/csv,application/json"
@@ -410,6 +411,11 @@ export function App() {
                 }}
               />
             </label>
+            {store.palette.id !== MARD_STANDARD_221_PALETTE.id ? (
+              <button type="button" className="secondary-button" onClick={() => store.setPalette(MARD_STANDARD_221_PALETTE)}>
+                切换到 MARD 标准 221 色
+              </button>
+            ) : null}
             <p className="helper">CSV 表头：code, hex, name, series。色号限 1–4 位字母/数字/连字符。</p>
           </section>
 

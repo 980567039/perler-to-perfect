@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { countCells, detectBorderBackground } from '../domain/grid';
-import { DEVELOPMENT_PALETTE } from '../domain/devPalette';
+import { MARD_STANDARD_221_PALETTE } from '../domain/mardPalette';
 import {
   EMPTY_CELL,
   createDefaultSettings,
@@ -72,8 +72,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   projectId: crypto.randomUUID(),
   projectName: '未命名拼豆图纸',
   createdAt: initialCreatedAt,
-  palette: DEVELOPMENT_PALETTE,
-  settings: createDefaultSettings(DEVELOPMENT_PALETTE),
+  palette: MARD_STANDARD_221_PALETTE,
+  settings: createDefaultSettings(MARD_STANDARD_221_PALETTE),
   cells: null,
   counts: [],
   totalBeads: 0,
