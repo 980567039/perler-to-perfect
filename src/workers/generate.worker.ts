@@ -21,10 +21,9 @@ function drawSampledImage(bitmap: ImageBitmap, settings: GenerationSettings): Im
   const context = canvas.getContext('2d', { willReadFrequently: true });
   if (!context) throw new Error('无法创建离屏画布。');
 
-  // Fill white background so that areas not covered by the image become white
-  // beads instead of empty cells (alpha < 128 → null representative).
-  context.fillStyle = '#ffffff';
-  context.fillRect(0, 0, width, height);
+  // Keep letterbox/crop margins transparent. Transparent samples become EMPTY
+  // cells in the generator instead of being mistaken for white beads.
+  context.clearRect(0, 0, width, height);
 
   context.imageSmoothingEnabled = true;
   context.imageSmoothingQuality = 'high';

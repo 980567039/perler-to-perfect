@@ -17,6 +17,7 @@ import {
 import { useProjectStore } from './state/projectStore';
 import { startGeneration, type GenerationTask } from './workers/generate.client';
 import { exportPattern } from './workers/export.client';
+import { RedinkBridge, type RedinkImportPayload } from './integrations/redinkBridge';
 
 const stageLabels: Record<Extract<GenerateResponse, { type: 'PROGRESS' }>['stage'], string> = {
   prepare: '准备图像',
@@ -57,7 +58,10 @@ export function App() {
   const [tileSize, setTileSize] = useState(50);
   const [notice, setNotice] = useState('已载入 MARD 标准 221 色；HEX 为屏幕近似值，实体颜色可能受光线和批次影响。');
   const [error, setError] = useState<string | null>(null);
+  const [handoffContext, setHandoffContext] = useState<RedinkImportPayload['context'] | null>(null);
   const generationTask = useRef<GenerationTask | null>(null);
+  const redinkBridge = useRef<RedinkBridge | null>(null);
+  const autoGenerateAfterImport = useRef(false);
 
   const selectedColor = store.palette.colors[selectedPaletteIndex] ?? store.palette.colors[0];
   const usedPaletteIndices = useMemo(() => new Set(store.counts.map((entry) => entry.paletteIndex)), [store.counts]);
@@ -195,6 +199,35 @@ export function App() {
     }
   };
 
+  useEffect(() => {
+    if (!sourceBlob || !autoGenerateAfterImport.current || isGenerating) return;
+    autoGenerateAfterImport.current = false;
+    void handleGenerate();
+  }, [isGenerating, sourceBlob]);
+
+  const handleRedinkImport = async (payload: RedinkImportPayload) => {
+    await handleImageFile(payload.image);
+    setHandoffContext(payload.context);
+    autoGenerateAfterImport.current = true;
+    setNotice('已从 RedInk 接收拼豆源图，正在按 104×104、40 色、细节优先生成。');
+    updateSetting({
+      grid: { columns: 104, rows: 104 },
+      maxUsedColors: 40,
+      detailPriority: true,
+      cleanupRegionSize: 0,
+    });
+  };
+
+  useEffect(() => {
+    const bridge = new RedinkBridge(handleRedinkImport);
+    redinkBridge.current = bridge;
+    if (bridge.connected) setNotice('已连接 RedInk，等待拼豆源图。');
+    return () => {
+      bridge.dispose();
+      if (redinkBridge.current === bridge) redinkBridge.current = null;
+    };
+  }, []);
+
   const updateSetting = (patch: Partial<typeof store.settings>) => {
     store.updateSettings({ ...store.settings, ...patch });
   };
@@ -214,6 +247,22 @@ export function App() {
     const lockedColorIds = store.settings.lockedColorIds.filter((colorId) => next.has(colorId));
     const maxUsedColors = Math.min(store.settings.maxUsedColors, enabledColorIds.length);
     updateSetting({ enabledColorIds, lockedColorIds, maxUsedColors });
+  };
+
+  const toggleLockedColor = (id: string) => {
+    if (!store.settings.enabledColorIds.includes(id)) {
+      setError('锁定色必须先启用。');
+      return;
+    }
+    const lockedColorIds = store.settings.lockedColorIds.includes(id)
+      ? store.settings.lockedColorIds.filter((colorId) => colorId !== id)
+      : [...store.settings.lockedColorIds, id];
+    if (lockedColorIds.length > store.settings.maxUsedColors) {
+      setError('锁定色数量不能超过实际用色上限。');
+      return;
+    }
+    updateSetting({ lockedColorIds });
+    setError(null);
   };
 
   const handlePickColor = (paletteIndex: number | null) => {
@@ -318,7 +367,16 @@ export function App() {
       );
       downloadBlob(result.master, `${fileStem}-master.png`);
       downloadBlob(result.archive, `${fileStem}-png.zip`);
-      setNotice('母版 PNG 与分块 ZIP 已生成。');
+      if (redinkBridge.current?.connected && handoffContext) {
+        await redinkBridge.current.sendPattern(result.master, {
+          columns: store.settings.grid.columns,
+          rows: store.settings.grid.rows,
+          usedColors: store.counts.length,
+        });
+        setNotice('母版 PNG 已回传 RedInk，等待确认后追加到原子主题末尾。');
+      } else {
+        setNotice('母版 PNG 与分块 ZIP 已生成。');
+      }
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '导出失败。');
     } finally {
@@ -619,10 +677,12 @@ export function App() {
             <PalettePanel
               palette={store.palette}
               enabledColorIds={store.settings.enabledColorIds}
+              lockedColorIds={store.settings.lockedColorIds}
               selectedPaletteIndex={selectedPaletteIndex}
               counts={store.counts}
               onSelect={setSelectedPaletteIndex}
               onToggleEnabled={toggleEnabledColor}
+              onToggleLocked={toggleLockedColor}
             />
             <div className="palette-footer">
               <span>启用 {enabledSet.size}</span>
