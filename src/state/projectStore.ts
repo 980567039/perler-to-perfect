@@ -38,9 +38,11 @@ interface ProjectState {
   future: EditPatch[];
   manuallyEdited: Set<number>;
   backgroundPreview: number[];
+  watermarkEnabled: boolean;
   revision: number;
   setProjectName: (name: string) => void;
   setSource: (source: SourceMetadata | null) => void;
+  setWatermarkEnabled: (enabled: boolean) => void;
   setPalette: (palette: PaletteManifest) => void;
   updateSettings: (settings: GenerationSettings) => void;
   setPattern: (result: PatternResult) => void;
@@ -83,10 +85,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   future: [],
   manuallyEdited: new Set<number>(),
   backgroundPreview: [],
+  watermarkEnabled: true,
   revision: 0,
 
   setProjectName: (projectName) => set({ projectName, revision: get().revision + 1 }),
   setSource: (source) => set({ source, revision: get().revision + 1 }),
+  setWatermarkEnabled: (watermarkEnabled) => set({ watermarkEnabled, revision: get().revision + 1 }),
 
   setPalette: (palette) =>
     set({
@@ -207,19 +211,21 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
 
   loadProject: (project) => {
-    const cells = decodeCellsRle(project.cellsRle, project.settings.grid.columns * project.settings.grid.rows);
-    const { counts, totalBeads } = countCells(cells, project.settings.grid, project.palette);
+    const settings = { ...project.settings, detailPriority: project.settings.detailPriority ?? true };
+    const cells = decodeCellsRle(project.cellsRle, settings.grid.columns * settings.grid.rows);
+    const { counts, totalBeads } = countCells(cells, settings.grid, project.palette);
     set({
       projectId: project.id,
       projectName: project.name,
       createdAt: project.createdAt,
       palette: project.palette,
-      settings: project.settings,
+      settings,
       cells,
       counts,
       totalBeads,
       selectedPaletteIndices: counts.map((entry) => entry.paletteIndex),
       source: project.source,
+      watermarkEnabled: project.watermarkEnabled ?? true,
       history: [],
       future: [],
       manuallyEdited: new Set<number>(),

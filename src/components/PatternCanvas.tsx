@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { contrastTextColor } from '../domain/color';
 import { EMPTY_CELL, type GridSize, type PaletteManifest } from '../domain/types';
+import { drawWatermark } from '../rendering/watermark';
 
-export type EditorTool = 'paint' | 'erase' | 'pan';
+export type EditorTool = 'paint' | 'eyedropper' | 'erase' | 'pan';
 
 interface PatternCanvasProps {
   cells: Uint16Array;
@@ -11,7 +12,10 @@ interface PatternCanvasProps {
   tool: EditorTool;
   selectedPaletteIndex: number;
   backgroundPreview: number[];
+  previewMode: boolean;
+  watermarkEnabled: boolean;
   onPaint: (indices: number[], value: number) => void;
+  onPickColor: (paletteIndex: number | null) => void;
 }
 
 interface Viewport {
@@ -27,7 +31,10 @@ export function PatternCanvas({
   tool,
   selectedPaletteIndex,
   backgroundPreview,
+  previewMode,
+  watermarkEnabled,
   onPaint,
+  onPickColor,
 }: PatternCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -109,7 +116,7 @@ export function PatternCanvas({
           context.fillStyle = 'rgba(220, 38, 38, 0.48)';
           context.fillRect(x, y, scale, scale);
         }
-        if (value !== EMPTY_CELL && scale >= 18) {
+        if (!previewMode && value !== EMPTY_CELL && scale >= 18) {
           const color = palette.colors[value];
           if (color) {
             const fontSize = Math.max(7, Math.min(12, Math.floor(scale * 0.38)));
@@ -126,40 +133,80 @@ export function PatternCanvas({
       }
     }
 
-    context.strokeStyle = 'rgba(55, 65, 81, 0.22)';
-    context.lineWidth = 1;
-    context.beginPath();
-    for (let column = startColumn; column <= endColumn; column += 1) {
-      const x = Math.round(offsetX + column * scale) + 0.5;
-      context.moveTo(x, Math.max(0, offsetY + startRow * scale));
-      context.lineTo(x, Math.min(size.height, offsetY + endRow * scale));
+    if (watermarkEnabled) {
+      drawWatermark(context, {
+        left: offsetX,
+        top: offsetY,
+        right: offsetX + grid.columns * scale,
+        bottom: offsetY + grid.rows * scale,
+        cellPixels: scale,
+      });
     }
-    for (let row = startRow; row <= endRow; row += 1) {
-      const y = Math.round(offsetY + row * scale) + 0.5;
-      context.moveTo(Math.max(0, offsetX + startColumn * scale), y);
-      context.lineTo(Math.min(size.width, offsetX + endColumn * scale), y);
-    }
-    context.stroke();
 
-    context.strokeStyle = 'rgba(220, 38, 38, 0.75)';
-    context.lineWidth = 1.5;
-    context.beginPath();
-    for (let column = Math.max(10, Math.ceil(startColumn / 10) * 10); column < endColumn; column += 10) {
-      const x = offsetX + column * scale;
-      context.moveTo(x, Math.max(0, offsetY));
-      context.lineTo(x, Math.min(size.height, offsetY + grid.rows * scale));
-    }
-    for (let row = Math.max(10, Math.ceil(startRow / 10) * 10); row < endRow; row += 10) {
-      const y = offsetY + row * scale;
-      context.moveTo(Math.max(0, offsetX), y);
-      context.lineTo(Math.min(size.width, offsetX + grid.columns * scale), y);
-    }
-    context.stroke();
+    if (!previewMode) {
+      context.strokeStyle = 'rgba(55, 65, 81, 0.22)';
+      context.lineWidth = 1;
+      context.beginPath();
+      for (let column = startColumn; column <= endColumn; column += 1) {
+        const x = Math.round(offsetX + column * scale) + 0.5;
+        context.moveTo(x, Math.max(0, offsetY + startRow * scale));
+        context.lineTo(x, Math.min(size.height, offsetY + endRow * scale));
+      }
+      for (let row = startRow; row <= endRow; row += 1) {
+        const y = Math.round(offsetY + row * scale) + 0.5;
+        context.moveTo(Math.max(0, offsetX + startColumn * scale), y);
+        context.lineTo(Math.min(size.width, offsetX + endColumn * scale), y);
+      }
+      context.stroke();
 
-    context.strokeStyle = '#111827';
-    context.lineWidth = 2;
-    context.strokeRect(offsetX, offsetY, grid.columns * scale, grid.rows * scale);
-  }, [backgroundPreview, cells, grid, palette.colors, previewSet, size, viewport]);
+      context.strokeStyle = 'rgba(220, 38, 38, 0.75)';
+      context.lineWidth = 1.5;
+      context.beginPath();
+      for (let column = Math.max(10, Math.ceil(startColumn / 10) * 10); column < endColumn; column += 10) {
+        const x = offsetX + column * scale;
+        context.moveTo(x, Math.max(0, offsetY));
+        context.lineTo(x, Math.min(size.height, offsetY + grid.rows * scale));
+      }
+      for (let row = Math.max(10, Math.ceil(startRow / 10) * 10); row < endRow; row += 10) {
+        const y = offsetY + row * scale;
+        context.moveTo(Math.max(0, offsetX), y);
+        context.lineTo(Math.min(size.width, offsetX + grid.columns * scale), y);
+      }
+      context.stroke();
+
+      context.strokeStyle = '#111827';
+      context.lineWidth = 2;
+      context.strokeRect(offsetX, offsetY, grid.columns * scale, grid.rows * scale);
+
+      // Keep the coordinate helpers readable at the default 104×104 view.
+      // As the user zooms in, progressively finer labels become available.
+      const labelStep = scale >= 18 ? 1 : scale >= 8 ? 5 : 10;
+      const shouldLabel = (value: number, maximum: number) =>
+        value === 1 ||
+        value === maximum ||
+        (value % labelStep === 0 && (labelStep === 1 || maximum - value >= labelStep / 2));
+      const axisFontSize = Math.max(9, Math.min(12, scale >= 18 ? Math.floor(scale * 0.38) : 10));
+      context.font = `600 ${axisFontSize}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;
+      context.fillStyle = '#4B5563';
+      context.textBaseline = 'middle';
+
+      const topLabelY = Math.max(8, Math.min(size.height - 8, offsetY - 9));
+      context.textAlign = 'center';
+      for (let column = startColumn; column < endColumn; column += 1) {
+        const label = column + 1;
+        if (!shouldLabel(label, grid.columns)) continue;
+        context.fillText(label.toString(), offsetX + (column + 0.5) * scale, topLabelY);
+      }
+
+      const leftLabelX = Math.max(28, Math.min(size.width - 8, offsetX - 9));
+      context.textAlign = 'right';
+      for (let row = startRow; row < endRow; row += 1) {
+        const label = row + 1;
+        if (!shouldLabel(label, grid.rows)) continue;
+        context.fillText(label.toString(), leftLabelX, offsetY + (row + 0.5) * scale);
+      }
+    }
+  }, [backgroundPreview, cells, grid, palette.colors, previewMode, previewSet, size, viewport, watermarkEnabled]);
 
   const eventCell = (event: React.PointerEvent<HTMLCanvasElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
@@ -174,8 +221,17 @@ export function PatternCanvas({
   const handlePointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
     event.currentTarget.setPointerCapture(event.pointerId);
     const rect = event.currentTarget.getBoundingClientRect();
-    const mode: EditorTool = event.button === 1 || event.button === 2 ? 'pan' : tool;
+    const mode: EditorTool = previewMode || event.button === 1 || event.button === 2 ? 'pan' : tool;
     const cell = eventCell(event);
+    if (mode === 'eyedropper') {
+      const value = cell ? cells[cell.index] ?? EMPTY_CELL : EMPTY_CELL;
+      onPickColor(value === EMPTY_CELL || value < 0 || value >= palette.colors.length ? null : value);
+      dragRef.current = null;
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+      return;
+    }
     dragRef.current = {
       mode,
       startX: event.clientX - rect.left,
@@ -206,9 +262,13 @@ export function PatternCanvas({
   const handlePointerUp = (event: React.PointerEvent<HTMLCanvasElement>) => {
     const drag = dragRef.current;
     dragRef.current = null;
-    if (!drag || drag.mode === 'pan' || drag.indices.size === 0) return;
-    onPaint([...drag.indices], drag.mode === 'erase' ? EMPTY_CELL : selectedPaletteIndex);
-    event.currentTarget.releasePointerCapture(event.pointerId);
+    if (!drag) return;
+    if (drag.mode !== 'pan' && drag.indices.size > 0) {
+      onPaint([...drag.indices], drag.mode === 'erase' ? EMPTY_CELL : selectedPaletteIndex);
+    }
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
   };
 
   const handleWheel = (event: React.WheelEvent<HTMLCanvasElement>) => {
@@ -227,7 +287,7 @@ export function PatternCanvas({
   };
 
   return (
-    <div className="canvas-shell" ref={containerRef}>
+    <div className={`canvas-shell ${previewMode ? 'is-preview' : ''}`} ref={containerRef}>
       <canvas
         ref={canvasRef}
         aria-label={`拼豆图纸画布，${grid.columns} 列 ${grid.rows} 行`}

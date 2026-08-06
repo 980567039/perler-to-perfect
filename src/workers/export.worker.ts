@@ -46,6 +46,7 @@ async function renderGrid(
     rows,
     columns,
     cellPixels,
+    watermarkEnabled: request.watermarkEnabled,
   });
   return canvasToBytes(canvas);
 }

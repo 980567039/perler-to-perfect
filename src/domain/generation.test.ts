@@ -36,6 +36,7 @@ describe('pattern generation', () => {
       enabledColorIds: ['test:white', 'test:black'],
       lockedColorIds: [],
       cleanupRegionSize: 0,
+      detailPriority: false,
     });
     expect([...result.cells]).toEqual([1]);
     expect(result.totalBeads).toBe(1);
@@ -50,6 +51,7 @@ describe('pattern generation', () => {
       enabledColorIds: ['test:white', 'test:black'],
       lockedColorIds: [],
       cleanupRegionSize: 0,
+      detailPriority: false,
     });
     expect(result.totalBeads).toBe(0);
     expect(result.counts).toEqual([]);
@@ -74,6 +76,7 @@ describe('pattern generation', () => {
         enabledColorIds: ['test:white', 'test:black'],
         lockedColorIds: [],
         cleanupRegionSize: 0,
+        detailPriority: false,
       },
     );
 
@@ -82,5 +85,29 @@ describe('pattern generation', () => {
     expect(result.counts).toHaveLength(1);
     expect(result.selectedPaletteIndices.length).toBeLessThanOrEqual(2);
     expect(result.cells.every((cell) => cell === 1)).toBe(true);
+  });
+
+  it('preserves a high-contrast feature that covers one quarter of a cell in detail-priority mode', () => {
+    const data = new Uint8ClampedArray(4 * 4 * 4);
+    for (let index = 0; index < 16; index += 1) {
+      const value = index < 4 ? 0 : 255;
+      data[index * 4] = value;
+      data[index * 4 + 1] = value;
+      data[index * 4 + 2] = value;
+      data[index * 4 + 3] = 255;
+    }
+    const sampledImage = { data, width: 4, height: 4, colorSpace: 'srgb' } as ImageData;
+    const baseSettings = {
+      grid: { columns: 1, rows: 1 },
+      fit: 'contain' as const,
+      transform: { scale: 1, offsetX: 0, offsetY: 0 },
+      maxUsedColors: 2,
+      enabledColorIds: ['test:white', 'test:black'],
+      lockedColorIds: [],
+      cleanupRegionSize: 0 as const,
+    };
+
+    expect(generatePattern(sampledImage, twoColorPalette, { ...baseSettings, detailPriority: false }).cells[0]).toBe(0);
+    expect(generatePattern(sampledImage, twoColorPalette, { ...baseSettings, detailPriority: true }).cells[0]).toBe(1);
   });
 });

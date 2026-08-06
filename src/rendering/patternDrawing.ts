@@ -1,5 +1,6 @@
 import { contrastTextColor } from '../domain/color';
 import { EMPTY_CELL, type GridSize, type PaletteManifest } from '../domain/types';
+import { drawWatermark } from './watermark';
 
 export interface DrawGridOptions {
   cells: Uint16Array;
@@ -10,6 +11,7 @@ export interface DrawGridOptions {
   rows: number;
   columns: number;
   cellPixels: number;
+  watermarkEnabled: boolean;
 }
 
 export function gridCanvasDimensions(columns: number, rows: number, cellPixels: number) {
@@ -32,7 +34,7 @@ function fitCellFont(context: OffscreenCanvasRenderingContext2D, code: string, c
 }
 
 export function drawPatternGrid(context: OffscreenCanvasRenderingContext2D, options: DrawGridOptions): void {
-  const { cells, fullGrid, palette, startRow, startColumn, rows, columns, cellPixels } = options;
+  const { cells, fullGrid, palette, startRow, startColumn, rows, columns, cellPixels, watermarkEnabled } = options;
   const { axis, width, height } = gridCanvasDimensions(columns, rows, cellPixels);
   context.imageSmoothingEnabled = false;
   context.fillStyle = '#FFFFFF';
@@ -72,6 +74,10 @@ export function drawPatternGrid(context: OffscreenCanvasRenderingContext2D, opti
   const gridTop = axis;
   const gridRight = axis + columns * cellPixels;
   const gridBottom = axis + rows * cellPixels;
+  if (watermarkEnabled) {
+    drawWatermark(context, { left: gridLeft, top: gridTop, right: gridRight, bottom: gridBottom, cellPixels });
+  }
+
   context.strokeStyle = '#D1D5DB';
   context.lineWidth = 1;
   context.beginPath();
@@ -116,14 +122,12 @@ export function drawPatternGrid(context: OffscreenCanvasRenderingContext2D, opti
 
   for (let localColumn = 0; localColumn < columns; localColumn += 1) {
     const number = startColumn + localColumn + 1;
-    if (number !== 1 && number !== fullGrid.columns && number % 10 !== 0) continue;
     const x = gridLeft + localColumn * cellPixels + cellPixels / 2;
     context.fillText(String(number), x, axis / 2);
     context.fillText(String(number), x, height - axis / 2);
   }
   for (let localRow = 0; localRow < rows; localRow += 1) {
     const number = startRow + localRow + 1;
-    if (number !== 1 && number !== fullGrid.rows && number % 10 !== 0) continue;
     const y = gridTop + localRow * cellPixels + cellPixels / 2;
     context.fillText(String(number), axis / 2, y);
     context.fillText(String(number), width - axis / 2, y);

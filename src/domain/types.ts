@@ -3,7 +3,7 @@ export const MAX_GRID_SIDE = 300;
 export const MAX_SOURCE_BYTES = 25 * 1024 * 1024;
 export const MAX_SOURCE_PIXELS = 40_000_000;
 export const PROJECT_SCHEMA_VERSION = 1 as const;
-export const ALGORITHM_VERSION = '0.1.0';
+export const ALGORITHM_VERSION = '0.2.0';
 
 export interface GridSize {
   columns: number;
@@ -61,6 +61,7 @@ export interface GenerationSettings {
   enabledColorIds: string[];
   lockedColorIds: string[];
   cleanupRegionSize: 0 | 1 | 2 | 3 | 4;
+  detailPriority: boolean;
 }
 
 export interface ColorCount {
@@ -91,6 +92,7 @@ export interface PatternProjectV1 {
   createdAt: string;
   updatedAt: string;
   algorithmVersion: string;
+  watermarkEnabled: boolean;
   palette: PaletteManifest;
   settings: GenerationSettings;
   cellsRle: Array<[cellIndex: number, runLength: number]>;
@@ -136,7 +138,7 @@ export type GenerateResponse =
       message: string;
     };
 
-export const DEFAULT_GRID: GridSize = { columns: 58, rows: 66 };
+export const DEFAULT_GRID: GridSize = { columns: 104, rows: 104 };
 
 export function createDefaultSettings(palette: PaletteManifest): GenerationSettings {
   return {
@@ -147,5 +149,6 @@ export function createDefaultSettings(palette: PaletteManifest): GenerationSetti
     enabledColorIds: palette.colors.map((color) => color.id),
     lockedColorIds: [],
     cleanupRegionSize: 2,
+    detailPriority: true,
   };
 }

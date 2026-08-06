@@ -230,6 +230,117 @@ button:disabled {
   white-space: nowrap;
 }
 
+.crop-editor {
+  margin-bottom: 12px;
+  padding: 10px;
+  color: #f9fafb;
+  background: #20242b;
+  border: 1px solid #414751;
+}
+
+.crop-editor-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.crop-editor-heading strong {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+.crop-editor-heading span {
+  color: #c8ccd2;
+  font-size: 9px;
+}
+
+.crop-viewport {
+  position: relative;
+  max-width: 100%;
+  margin: 0 auto;
+  overflow: hidden;
+  background: #0f1318;
+  border: 1px solid #757b85;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.24);
+  touch-action: none;
+  user-select: none;
+}
+
+.crop-viewport.is-cropping {
+  cursor: grab;
+}
+
+.crop-viewport.is-cropping:active {
+  cursor: grabbing;
+}
+
+.crop-viewport img {
+  position: absolute;
+  display: block;
+  max-width: none;
+  pointer-events: none;
+  user-select: none;
+}
+
+.crop-guide {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border: 1px solid rgba(255, 255, 255, 0.74);
+  background:
+    linear-gradient(90deg, transparent 32.9%, rgba(255, 255, 255, 0.26) 33%, transparent 33.3%, transparent 66.2%, rgba(255, 255, 255, 0.26) 66.5%, transparent 66.8%),
+    linear-gradient(0deg, transparent 32.9%, rgba(255, 255, 255, 0.26) 33%, transparent 33.3%, transparent 66.2%, rgba(255, 255, 255, 0.26) 66.5%, transparent 66.8%);
+}
+
+.crop-viewport.is-contained .crop-guide {
+  border-style: dashed;
+  opacity: 0.65;
+}
+
+.crop-editor-controls {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 8px;
+  font-family: ui-monospace, monospace;
+  font-size: 9px;
+}
+
+.crop-editor-controls > span {
+  margin-right: auto;
+  color: #c8ccd2;
+}
+
+.crop-editor-controls button {
+  min-width: 23px;
+  height: 22px;
+  padding: 1px 5px;
+  color: #f9fafb;
+  background: transparent;
+  border: 1px solid #757b85;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.crop-editor-controls button:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: rgba(232, 74, 60, 0.18);
+}
+
+.crop-editor-controls .crop-reset {
+  padding-inline: 7px;
+  font-size: 9px;
+}
+
+.crop-helper {
+  margin: 7px 0 0;
+  color: #aeb4be;
+  font-size: 9px;
+  line-height: 1.45;
+}
+
 .field-row,
 .field-stack {
   margin-top: 11px;
@@ -292,6 +403,48 @@ input[type="range"] {
 .palette-meta span {
   color: #c8ccd2;
   font-size: 10px;
+}
+
+.detail-priority-toggle {
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  align-items: center;
+  gap: 9px;
+  margin-top: 11px;
+  padding: 9px;
+  color: #4b5563;
+  background: #f4f1eb;
+  border: 1px solid var(--line);
+  cursor: pointer;
+}
+
+.detail-priority-toggle.active {
+  color: #173f32;
+  background: #eaf6f0;
+  border-color: #8fc7ae;
+}
+
+.detail-priority-toggle input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--green);
+}
+
+.detail-priority-toggle span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.detail-priority-toggle strong {
+  font-size: 11px;
+}
+
+.detail-priority-toggle small {
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.4;
 }
 
 .primary-button,
@@ -420,6 +573,21 @@ input[type="range"] {
   background: var(--ink);
 }
 
+.preview-toggle-group {
+  margin-left: 2px;
+}
+
+.preview-toggle-group button {
+  color: var(--accent-dark);
+  font-weight: 750;
+}
+
+.preview-toggle-group button.active {
+  color: white;
+  background: var(--accent);
+  border-color: var(--accent-dark);
+}
+
 .stage-summary {
   margin-left: auto;
   display: flex;
@@ -448,9 +616,17 @@ input[type="range"] {
   cursor: crosshair;
 }
 
+.canvas-shell.is-preview canvas {
+  cursor: grab;
+}
+
+.canvas-shell.is-preview canvas:active {
+  cursor: grabbing;
+}
+
 .canvas-hud {
   position: absolute;
-  left: 10px;
+  right: 10px;
   bottom: 10px;
   display: flex;
   align-items: center;

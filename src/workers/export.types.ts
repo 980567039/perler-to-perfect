@@ -10,6 +10,7 @@ export interface ExportRequest {
   counts: ColorCount[];
   totalBeads: number;
   tileSize: number;
+  watermarkEnabled: boolean;
 }
 
 export type ExportResponse =

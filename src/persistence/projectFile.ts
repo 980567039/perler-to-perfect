@@ -20,6 +20,7 @@ const settingsSchema = z.object({
   enabledColorIds: z.array(z.string()),
   lockedColorIds: z.array(z.string()),
   cleanupRegionSize: z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3), z.literal(4)]),
+  detailPriority: z.boolean().default(true),
 });
 
 const sourceSchema = z.object({
@@ -36,6 +37,7 @@ const projectSchema = z.object({
   createdAt: z.string(),
   updatedAt: z.string(),
   algorithmVersion: z.string(),
+  watermarkEnabled: z.boolean().default(true),
   palette: z.unknown(),
   settings: settingsSchema,
   cellsRle: rleSchema,
@@ -48,6 +50,7 @@ export interface ProjectSnapshotInput {
   createdAt: string;
   palette: PaletteManifest;
   settings: GenerationSettings;
+  watermarkEnabled: boolean;
   cells: Uint16Array;
   source: SourceMetadata;
 }
@@ -60,6 +63,7 @@ export function createProjectSnapshot(input: ProjectSnapshotInput): PatternProje
     createdAt: input.createdAt,
     updatedAt: new Date().toISOString(),
     algorithmVersion: ALGORITHM_VERSION,
+    watermarkEnabled: input.watermarkEnabled,
     palette: input.palette,
     settings: input.settings,
     cellsRle: encodeCellsRle(input.cells),

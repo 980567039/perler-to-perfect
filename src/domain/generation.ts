@@ -15,6 +15,7 @@ const SAMPLE_SCALE = 4;
 interface RepresentativeCell {
   bucketKey: number;
   rgb: RgbColor;
+  detailWeight: number;
 }
 
 interface HistogramBucket {
@@ -46,9 +47,12 @@ function representativeForCell(
   imageWidth: number,
   cellRow: number,
   cellColumn: number,
+  detailPriority: boolean,
 ): RepresentativeCell | null {
   const buckets = new Map<number, { count: number; r: number; g: number; b: number }>();
   let visibleSamples = 0;
+  let minimumLuminance = 255;
+  let maximumLuminance = 0;
   const startX = cellColumn * SAMPLE_SCALE;
   const startY = cellRow * SAMPLE_SCALE;
   for (let y = startY; y < startY + SAMPLE_SCALE; y += 1) {
@@ -68,6 +72,9 @@ function representativeForCell(
       current.g += rgb.g;
       current.b += rgb.b;
       buckets.set(key, current);
+      const luminance = rgb.r * 0.2126 + rgb.g * 0.7152 + rgb.b * 0.0722;
+      minimumLuminance = Math.min(minimumLuminance, luminance);
+      maximumLuminance = Math.max(maximumLuminance, luminance);
       visibleSamples += 1;
     }
   }
@@ -82,12 +89,43 @@ function representativeForCell(
     }
   }
 
+  if (detailPriority && buckets.size > 1) {
+    const dominantRgb = {
+      r: winning.r / winning.count,
+      g: winning.g / winning.count,
+      b: winning.b / winning.count,
+    };
+    const minimumCoverage = Math.max(2, Math.ceil(visibleSamples * 0.2));
+    let winningScore = winning.count;
+    for (const [key, value] of buckets) {
+      if (key === winningKey || value.count < minimumCoverage) continue;
+      const candidateRgb = {
+        r: value.r / value.count,
+        g: value.g / value.count,
+        b: value.b / value.count,
+      };
+      const distance = Math.hypot(
+        candidateRgb.r - dominantRgb.r,
+        candidateRgb.g - dominantRgb.g,
+        candidateRgb.b - dominantRgb.b,
+      );
+      const contrast = Math.min(1, distance / Math.sqrt(3 * 255 * 255));
+      const score = value.count + contrast * 9;
+      if (score > winningScore + 1e-6 || (Math.abs(score - winningScore) <= 1e-6 && key < winningKey)) {
+        winningKey = key;
+        winning = value;
+        winningScore = score;
+      }
+    }
+  }
+
   const rgb = {
     r: Math.round(winning.r / winning.count),
     g: Math.round(winning.g / winning.count),
     b: Math.round(winning.b / winning.count),
   };
-  return { bucketKey: colorBucketKey(rgb), rgb };
+  const detailWeight = detailPriority ? 1 + Math.min(2, (maximumLuminance - minimumLuminance) / 128) : 1;
+  return { bucketKey: colorBucketKey(rgb), rgb, detailWeight };
 }
 
 function validateGenerationSettings(settings: GenerationSettings, palette: PaletteManifest): number[] {
@@ -116,14 +154,15 @@ function buildHistogram(representatives: Array<RepresentativeCell | null>): {
   buckets: HistogramBucket[];
   bucketIndexByKey: Map<number, number>;
 } {
-  const raw = new Map<number, { r: number; g: number; b: number; count: number }>();
+  const raw = new Map<number, { r: number; g: number; b: number; count: number; weight: number }>();
   for (const representative of representatives) {
     if (!representative) continue;
-    const current = raw.get(representative.bucketKey) ?? { r: 0, g: 0, b: 0, count: 0 };
+    const current = raw.get(representative.bucketKey) ?? { r: 0, g: 0, b: 0, count: 0, weight: 0 };
     current.r += representative.rgb.r;
     current.g += representative.rgb.g;
     current.b += representative.rgb.b;
     current.count += 1;
+    current.weight += representative.detailWeight;
     raw.set(representative.bucketKey, current);
   }
 
@@ -135,7 +174,7 @@ function buildHistogram(representatives: Array<RepresentativeCell | null>): {
         g: Math.round(value.g / value.count),
         b: Math.round(value.b / value.count),
       };
-      return { key, rgb, lab: rgbToLab(rgb), weight: value.count };
+      return { key, rgb, lab: rgbToLab(rgb), weight: value.weight };
     });
   return { buckets, bucketIndexByKey: new Map(buckets.map((bucket, index) => [bucket.key, index])) };
 }
@@ -347,7 +386,13 @@ export function generatePattern(
     }
     const row = Math.floor(index / settings.grid.columns);
     const column = index % settings.grid.columns;
-    representatives[index] = representativeForCell(sampledImage.data, sampledImage.width, row, column);
+    representatives[index] = representativeForCell(
+      sampledImage.data,
+      sampledImage.width,
+      row,
+      column,
+      settings.detailPriority,
+    );
   }
   options.onProgress?.({ stage: 'sample', completed: cellCount, total: cellCount });
 
@@ -413,7 +458,7 @@ export function generatePattern(
   const cells = cleanupSmallRegions(
     mapped,
     settings.grid,
-    settings.cleanupRegionSize,
+    settings.detailPriority ? 0 : settings.cleanupRegionSize,
     paletteLabs,
     lockedPaletteIndices,
   );

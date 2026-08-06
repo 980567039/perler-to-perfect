@@ -9,6 +9,7 @@ interface ExportInput {
   counts: ColorCount[];
   totalBeads: number;
   tileSize: number;
+  watermarkEnabled: boolean;
 }
 
 export interface ExportResult {
@@ -57,6 +58,7 @@ export function exportPattern(
         counts: input.counts,
         totalBeads: input.totalBeads,
         tileSize: input.tileSize,
+        watermarkEnabled: input.watermarkEnabled,
       },
       [cellsBuffer],
     );

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { CropPreview } from './components/CropPreview';
 import { PatternCanvas, type EditorTool } from './components/PatternCanvas';
 import { PalettePanel } from './components/PalettePanel';
-import { MAX_SOURCE_BYTES, MAX_SOURCE_PIXELS, type GenerateResponse } from './domain/types';
+import { ALGORITHM_VERSION, MAX_SOURCE_BYTES, MAX_SOURCE_PIXELS, type GenerateResponse } from './domain/types';
 import { MARD_STANDARD_221_PALETTE } from './domain/mardPalette';
 import { paletteFromFileContents } from './domain/palette';
 import { loadMostRecentProject, saveProject } from './persistence/database';
@@ -48,6 +49,7 @@ export function App() {
   const [sourceDimensions, setSourceDimensions] = useState<{ width: number; height: number } | null>(null);
   const [selectedPaletteIndex, setSelectedPaletteIndex] = useState(0);
   const [tool, setTool] = useState<EditorTool>('paint');
+  const [previewMode, setPreviewMode] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [generationProgress, setGenerationProgress] = useState({ label: '', completed: 0, total: 1 });
   const [isExporting, setIsExporting] = useState(false);
@@ -116,13 +118,14 @@ export function App() {
         createdAt: store.createdAt,
         palette: store.palette,
         settings: store.settings,
+        watermarkEnabled: store.watermarkEnabled,
         cells: store.cells!,
         source: store.source!,
       });
       void saveProject(snapshot, sourceBlob ?? undefined).catch(() => setNotice('自动保存失败，请手动导出工程 JSON。'));
     }, 1000);
     return () => window.clearTimeout(timeout);
-  }, [sourceBlob, store.cells, store.createdAt, store.palette, store.projectId, store.projectName, store.revision, store.settings, store.source]);
+  }, [sourceBlob, store.cells, store.createdAt, store.palette, store.projectId, store.projectName, store.revision, store.settings, store.source, store.watermarkEnabled]);
 
   useEffect(() => {
     if (selectedPaletteIndex >= store.palette.colors.length) setSelectedPaletteIndex(0);
@@ -147,7 +150,7 @@ export function App() {
     setSourceBlob(file);
     setSourceUrl(URL.createObjectURL(file));
     setSourceDimensions(dimensions);
-    store.clearPattern();
+    store.updateSettings({ ...store.settings, transform: { scale: 1, offsetX: 0, offsetY: 0 } });
     store.setSource({ fileName: file.name, mimeType: file.type, sha256 });
     store.setProjectName(file.name.replace(/\.[^.]+$/, '') || '未命名拼豆图纸');
     setNotice(`已载入 ${dimensions.width}×${dimensions.height}，图片仅在本机处理。`);
@@ -208,6 +211,18 @@ export function App() {
     updateSetting({ enabledColorIds, lockedColorIds, maxUsedColors });
   };
 
+  const handlePickColor = (paletteIndex: number | null) => {
+    if (paletteIndex === null) {
+      setError('吸色失败：这个格子是空格，请点击有颜色的格子。');
+      return;
+    }
+    const color = store.palette.colors[paletteIndex];
+    if (!color) return;
+    setSelectedPaletteIndex(paletteIndex);
+    setError(null);
+    setNotice(`已吸取色号 ${color.code}，当前画笔颜色已更新；点击“画笔”结束吸色。`);
+  };
+
   const handlePaletteFile = async (file: File) => {
     setError(null);
     try {
@@ -244,6 +259,7 @@ export function App() {
       createdAt: store.createdAt,
       palette: store.palette,
       settings: store.settings,
+      watermarkEnabled: store.watermarkEnabled,
       cells: store.cells,
       source: store.source,
     });
@@ -270,6 +286,7 @@ export function App() {
           counts: store.counts,
           totalBeads: store.totalBeads,
           tileSize,
+          watermarkEnabled: store.watermarkEnabled,
         },
         (message) =>
           setExportProgress({ label: message.stage, completed: message.completed, total: Math.max(1, message.total) }),
@@ -331,6 +348,16 @@ export function App() {
                 </span>
               </div>
             ) : null}
+            {sourceUrl && sourceDimensions ? (
+              <CropPreview
+                sourceUrl={sourceUrl}
+                sourceDimensions={sourceDimensions}
+                grid={store.settings.grid}
+                fit={store.settings.fit}
+                transform={store.settings.transform}
+                onChange={(transform) => updateSetting({ transform })}
+              />
+            ) : null}
             <div className="field-row two-columns">
               <label>
                 列数
@@ -377,6 +404,17 @@ export function App() {
               <strong>{store.palette.edition}</strong>
               <span>{store.palette.colors.length} 个可用色号</span>
             </div>
+            <label className={`detail-priority-toggle ${store.settings.detailPriority ? 'active' : ''}`}>
+              <input
+                type="checkbox"
+                checked={store.settings.detailPriority}
+                onChange={(event) => updateSetting({ detailPriority: event.target.checked })}
+              />
+              <span>
+                <strong>细节优先</strong>
+                <small>保护轮廓和高对比小区域，不合并 1–2 格细节</small>
+              </span>
+            </label>
             <label className="field-stack">
               实际用色上限：{store.settings.maxUsedColors}
               <input
@@ -388,12 +426,13 @@ export function App() {
               />
             </label>
             <label className="field-stack">
-              杂色清理：≤ {store.settings.cleanupRegionSize} 格
+              {store.settings.detailPriority ? '杂色清理：细节优先时关闭' : `杂色清理：≤ ${store.settings.cleanupRegionSize} 格`}
               <input
                 type="range"
                 min="0"
                 max="4"
                 value={store.settings.cleanupRegionSize}
+                disabled={store.settings.detailPriority}
                 onChange={(event) =>
                   updateSetting({ cleanupRegionSize: Number(event.target.value) as 0 | 1 | 2 | 3 | 4 })
                 }
@@ -442,6 +481,7 @@ export function App() {
               {(
                 [
                   ['paint', '画笔'],
+                  ['eyedropper', '吸色'],
                   ['erase', '橡皮'],
                   ['pan', '平移'],
                 ] as const
@@ -449,7 +489,7 @@ export function App() {
                 <button
                   type="button"
                   className={tool === value ? 'active' : ''}
-                  disabled={!store.cells}
+                  disabled={!store.cells || previewMode}
                   key={value}
                   onClick={() => setTool(value)}
                 >
@@ -458,11 +498,22 @@ export function App() {
               ))}
             </div>
             <div className="tool-group">
-              <button type="button" disabled={store.history.length === 0} onClick={store.undo}>
+              <button type="button" disabled={previewMode || store.history.length === 0} onClick={store.undo}>
                 撤销
               </button>
-              <button type="button" disabled={store.future.length === 0} onClick={store.redo}>
+              <button type="button" disabled={previewMode || store.future.length === 0} onClick={store.redo}>
                 重做
+              </button>
+            </div>
+            <div className="tool-group preview-toggle-group" aria-label="图纸视图">
+              <button
+                type="button"
+                className={previewMode ? 'active' : ''}
+                disabled={!store.cells}
+                aria-pressed={previewMode}
+                onClick={() => setPreviewMode((current) => !current)}
+              >
+                {previewMode ? '返回编辑' : '最终效果'}
               </button>
             </div>
             <div className="stage-summary">
@@ -481,7 +532,10 @@ export function App() {
                 tool={tool}
                 selectedPaletteIndex={selectedPaletteIndex}
                 backgroundPreview={store.backgroundPreview}
+                previewMode={previewMode}
+                watermarkEnabled={store.watermarkEnabled}
                 onPaint={store.paintCells}
+                onPickColor={handlePickColor}
               />
               <div className="background-actions">
                 {store.backgroundPreview.length === 0 ? (
@@ -579,6 +633,17 @@ export function App() {
                 <option value="100">100×100</option>
               </select>
             </label>
+            <label className={`detail-priority-toggle ${store.watermarkEnabled ? 'active' : ''}`}>
+              <input
+                type="checkbox"
+                checked={store.watermarkEnabled}
+                onChange={(event) => store.setWatermarkEnabled(event.target.checked)}
+              />
+              <span>
+                <strong>显示水印</strong>
+                <small>编辑画布、最终效果和导出同步显示“8Bit像素画”</small>
+              </span>
+            </label>
             <button type="button" className="primary-button" disabled={!store.cells || isExporting} onClick={() => void handlePatternExport()}>
               {isExporting ? '正在导出…' : '导出母版 PNG + 分块 ZIP'}
             </button>
@@ -597,7 +662,7 @@ export function App() {
 
       <footer className="statusbar">
         <span className={error ? 'status-error' : ''}>{error ?? notice}</span>
-        <span>算法 v0.1.0 · {store.palette.source.label}</span>
+        <span>算法 v{ALGORITHM_VERSION} · {store.palette.source.label}</span>
       </footer>
     </div>
   );
