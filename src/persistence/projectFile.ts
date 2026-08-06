@@ -16,6 +16,14 @@ const settingsSchema = z.object({
   grid: z.object({ columns: z.number().int(), rows: z.number().int() }),
   fit: z.enum(['contain', 'crop']),
   transform: z.object({ scale: z.number().positive(), offsetX: z.number(), offsetY: z.number() }),
+  cropBox: z
+    .object({
+      x: z.number().min(0).max(1),
+      y: z.number().min(0).max(1),
+      width: z.number().positive().max(1),
+      height: z.number().positive().max(1),
+    })
+    .optional(),
   maxUsedColors: z.number().int().min(2).max(64),
   enabledColorIds: z.array(z.string()),
   lockedColorIds: z.array(z.string()),

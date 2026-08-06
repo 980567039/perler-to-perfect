@@ -299,6 +299,77 @@ button:disabled {
   opacity: 0.65;
 }
 
+.crop-box-overlay {
+  position: absolute;
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.55);
+  border: 1px solid var(--accent);
+  box-sizing: border-box;
+  cursor: move;
+  touch-action: none;
+}
+
+.crop-box-line {
+  position: absolute;
+}
+.crop-box-line.n {
+  top: -4px;
+  left: 0;
+  right: 0;
+  height: 8px;
+  cursor: ns-resize;
+}
+.crop-box-line.s {
+  bottom: -4px;
+  left: 0;
+  right: 0;
+  height: 8px;
+  cursor: ns-resize;
+}
+.crop-box-line.w {
+  left: -4px;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  cursor: ew-resize;
+}
+.crop-box-line.e {
+  right: -4px;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  cursor: ew-resize;
+}
+
+.crop-box-handle {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  background: var(--accent);
+  border: 1.5px solid #ffffff;
+  border-radius: 2px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+.crop-box-handle.nw {
+  top: -5px;
+  left: -5px;
+  cursor: nwse-resize;
+}
+.crop-box-handle.ne {
+  top: -5px;
+  right: -5px;
+  cursor: nesw-resize;
+}
+.crop-box-handle.se {
+  bottom: -5px;
+  right: -5px;
+  cursor: nwse-resize;
+}
+.crop-box-handle.sw {
+  bottom: -5px;
+  left: -5px;
+  cursor: nesw-resize;
+}
+
 .crop-editor-controls {
   display: flex;
   align-items: center;
@@ -327,6 +398,17 @@ button:disabled {
 .crop-editor-controls button:hover:not(:disabled) {
   border-color: var(--accent);
   background: rgba(232, 74, 60, 0.18);
+}
+
+.crop-editor-controls .crop-commit {
+  color: #ffffff;
+  background: var(--accent);
+  border-color: var(--accent-dark);
+  font-size: 9px;
+}
+
+.crop-editor-controls .crop-cancel {
+  font-size: 9px;
 }
 
 .crop-editor-controls .crop-reset {

@@ -1,7 +1,7 @@
-import { useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { PointerEvent, WheelEvent } from 'react';
 import { GENERATION_SAMPLE_SCALE } from '../domain/generation';
-import type { GenerationSettings, GridSize } from '../domain/types';
+import type { CropBox, GenerationSettings, GridSize } from '../domain/types';
 
 const PREVIEW_MAX_WIDTH = 258;
 const PREVIEW_MAX_HEIGHT = 220;
@@ -16,7 +16,9 @@ interface CropPreviewProps {
   grid: GridSize;
   fit: GenerationSettings['fit'];
   transform: CropTransform;
-  onChange: (transform: CropTransform) => void;
+  cropBox?: CropBox;
+  onCommit: (change: { transform: CropTransform; cropBox: CropBox | undefined }) => void;
+  onCancel: () => void;
 }
 
 interface PreviewSize {
@@ -29,15 +31,28 @@ interface ImageLayout extends PreviewSize {
   top: number;
 }
 
-interface PointerStart {
+type HandleType = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w' | 'move';
+
+const FULL_CROP_BOX: CropBox = { x: 0, y: 0, width: 1, height: 1 };
+
+interface HandlePointerStart {
   pointerId: number;
   clientX: number;
   clientY: number;
-  transform: CropTransform;
+  handle: HandleType;
+  cropBox: CropBox;
 }
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
+}
+
+function sameTransform(first: CropTransform, second: CropTransform): boolean {
+  return first.scale === second.scale && first.offsetX === second.offsetX && first.offsetY === second.offsetY;
+}
+
+function sameCropBox(first: CropBox, second: CropBox): boolean {
+  return first.x === second.x && first.y === second.y && first.width === second.width && first.height === second.height;
 }
 
 export function getCropPreviewSize(grid: GridSize): PreviewSize {
@@ -101,20 +116,150 @@ export function clampCropTransform(
   };
 }
 
-export function CropPreview({ sourceUrl, sourceDimensions, grid, fit, transform, onChange }: CropPreviewProps) {
-  const pointerStart = useRef<PointerStart | null>(null);
+export function CropPreview({
+  sourceUrl,
+  sourceDimensions,
+  grid,
+  fit,
+  transform,
+  cropBox,
+  onCommit,
+  onCancel,
+}: CropPreviewProps) {
+  const pointerStart = useRef<{
+    pointerId: number;
+    clientX: number;
+    clientY: number;
+    transform: CropTransform;
+  } | null>(null);
+
+  const handlePointerStart = useRef<HandlePointerStart | null>(null);
+  const [draftTransform, setDraftTransform] = useState<CropTransform>(() => ({ ...transform }));
+  const [draftCropBox, setDraftCropBox] = useState<CropBox>(() => ({ ...(cropBox ?? FULL_CROP_BOX) }));
+
   const previewSize = useMemo(() => getCropPreviewSize(grid), [grid.columns, grid.rows]);
-  const imageLayout = useMemo(
-    () => getImageLayout(sourceDimensions, grid, fit, transform, previewSize),
-    [fit, grid, previewSize, sourceDimensions, transform],
-  );
   const cropEnabled = fit === 'crop';
 
-  const reset = () => onChange({ scale: MIN_CROP_SCALE, offsetX: 0, offsetY: 0 });
+  useEffect(() => {
+    setDraftTransform({ ...transform });
+    setDraftCropBox({ ...(cropBox ?? FULL_CROP_BOX) });
+  }, [cropBox, cropEnabled, transform]);
+
+  const previewTransform = cropEnabled ? draftTransform : transform;
+  const imageLayout = useMemo(
+    () => getImageLayout(sourceDimensions, grid, fit, previewTransform, previewSize),
+    [fit, grid, previewSize, previewTransform, sourceDimensions],
+  );
+
+  const effectiveCropBox: CropBox = useMemo(() => {
+    return cropEnabled ? draftCropBox : FULL_CROP_BOX;
+  }, [cropEnabled, draftCropBox]);
+
+  const hasDraftChanges =
+    cropEnabled &&
+    (!sameTransform(draftTransform, transform) || !sameCropBox(draftCropBox, cropBox ?? FULL_CROP_BOX));
+
+  const reset = () => {
+    setDraftTransform({ scale: MIN_CROP_SCALE, offsetX: 0, offsetY: 0 });
+    setDraftCropBox({ ...FULL_CROP_BOX });
+  };
 
   const adjustScale = (delta: number) => {
-    const next = clamp((Number.isFinite(transform.scale) ? transform.scale : MIN_CROP_SCALE) + delta, MIN_CROP_SCALE, MAX_CROP_SCALE);
-    onChange(clampCropTransform(sourceDimensions, grid, { ...transform, scale: next }, previewSize));
+    const next = clamp(
+      (Number.isFinite(draftTransform.scale) ? draftTransform.scale : MIN_CROP_SCALE) + delta,
+      MIN_CROP_SCALE,
+      MAX_CROP_SCALE,
+    );
+    setDraftTransform(clampCropTransform(sourceDimensions, grid, { ...draftTransform, scale: next }, previewSize));
+  };
+
+  const handleHandlePointerDown = (handle: HandleType, event: PointerEvent<HTMLDivElement>) => {
+    if (!cropEnabled || event.button !== 0) return;
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    handlePointerStart.current = {
+      pointerId: event.pointerId,
+      clientX: event.clientX,
+      clientY: event.clientY,
+      handle,
+      cropBox: { ...effectiveCropBox },
+    };
+  };
+
+  const handleHandlePointerMove = (event: PointerEvent<HTMLDivElement>) => {
+    const start = handlePointerStart.current;
+    if (!start || start.pointerId !== event.pointerId) return;
+    event.stopPropagation();
+
+    const dx = (event.clientX - start.clientX) / previewSize.width;
+    const dy = (event.clientY - start.clientY) / previewSize.height;
+
+    let { x, y, width, height } = start.cropBox;
+    const minSize = 0.05;
+
+    switch (start.handle) {
+      case 'nw': {
+        const nx = clamp(x + dx, 0, x + width - minSize);
+        const ny = clamp(y + dy, 0, y + height - minSize);
+        width += x - nx;
+        height += y - ny;
+        x = nx;
+        y = ny;
+        break;
+      }
+      case 'n': {
+        const ny = clamp(y + dy, 0, y + height - minSize);
+        height += y - ny;
+        y = ny;
+        break;
+      }
+      case 'ne': {
+        width = clamp(width + dx, minSize, 1 - x);
+        const ny = clamp(y + dy, 0, y + height - minSize);
+        height += y - ny;
+        y = ny;
+        break;
+      }
+      case 'e': {
+        width = clamp(width + dx, minSize, 1 - x);
+        break;
+      }
+      case 'se': {
+        width = clamp(width + dx, minSize, 1 - x);
+        height = clamp(height + dy, minSize, 1 - y);
+        break;
+      }
+      case 's': {
+        height = clamp(height + dy, minSize, 1 - y);
+        break;
+      }
+      case 'sw': {
+        const nx = clamp(x + dx, 0, x + width - minSize);
+        width += x - nx;
+        x = nx;
+        height = clamp(height + dy, minSize, 1 - y);
+        break;
+      }
+      case 'w': {
+        const nx = clamp(x + dx, 0, x + width - minSize);
+        width += x - nx;
+        x = nx;
+        break;
+      }
+      case 'move': {
+        x = clamp(x + dx, 0, 1 - width);
+        y = clamp(y + dy, 0, 1 - height);
+        break;
+      }
+    }
+
+    setDraftCropBox({ x, y, width, height });
+  };
+
+  const handleHandlePointerUp = (event: PointerEvent<HTMLDivElement>) => {
+    if (handlePointerStart.current?.pointerId === event.pointerId) {
+      handlePointerStart.current = null;
+    }
   };
 
   const handlePointerDown = (event: PointerEvent<HTMLDivElement>) => {
@@ -124,7 +269,7 @@ export function CropPreview({ sourceUrl, sourceDimensions, grid, fit, transform,
       pointerId: event.pointerId,
       clientX: event.clientX,
       clientY: event.clientY,
-      transform: { ...transform },
+      transform: { ...draftTransform },
     };
   };
 
@@ -133,7 +278,7 @@ export function CropPreview({ sourceUrl, sourceDimensions, grid, fit, transform,
     if (!start || start.pointerId !== event.pointerId) return;
     const offsetScaleX = previewSize.width / (grid.columns * GENERATION_SAMPLE_SCALE);
     const offsetScaleY = previewSize.height / (grid.rows * GENERATION_SAMPLE_SCALE);
-    onChange(
+    setDraftTransform(
       clampCropTransform(
         sourceDimensions,
         grid,
@@ -157,11 +302,32 @@ export function CropPreview({ sourceUrl, sourceDimensions, grid, fit, transform,
     adjustScale(event.deltaY < 0 ? 0.1 : -0.1);
   };
 
+  const commit = () => {
+    if (!hasDraftChanges) return;
+    onCommit({ transform: { ...draftTransform }, cropBox: { ...draftCropBox } });
+  };
+
+  const cancel = () => {
+    setDraftTransform({ ...transform });
+    setDraftCropBox({ ...(cropBox ?? FULL_CROP_BOX) });
+    onCancel();
+  };
+
+  const cropOverlayStyle = useMemo(() => {
+    const box = effectiveCropBox;
+    return {
+      left: `${box.x * 100}%`,
+      top: `${box.y * 100}%`,
+      width: `${box.width * 100}%`,
+      height: `${box.height * 100}%`,
+    };
+  }, [effectiveCropBox]);
+
   return (
     <div className="crop-editor">
       <div className="crop-editor-heading">
         <strong>裁切取景</strong>
-        <span>{cropEnabled ? '拖动图片调整范围' : '切换到居中裁切后可调整'}</span>
+        <span>{cropEnabled ? '拖动边框手柄精细裁切' : '切换到居中裁切后可调整'}</span>
       </div>
       <div
         className={`crop-viewport ${cropEnabled ? 'is-cropping' : 'is-contained'}`}
@@ -173,7 +339,7 @@ export function CropPreview({ sourceUrl, sourceDimensions, grid, fit, transform,
         onPointerUp={releasePointer}
         onWheel={handleWheel}
         role="img"
-        aria-label={cropEnabled ? '拖动或滚动调整裁切取景' : '原图适配预览'}
+        aria-label={cropEnabled ? '拖动边缘手柄或图片调整裁切范围' : '原图适配预览'}
       >
         <img
           src={sourceUrl}
@@ -181,10 +347,31 @@ export function CropPreview({ sourceUrl, sourceDimensions, grid, fit, transform,
           draggable={false}
           style={{ width: imageLayout.width, height: imageLayout.height, left: imageLayout.left, top: imageLayout.top }}
         />
-        <span className="crop-guide" aria-hidden="true" />
+        {cropEnabled ? (
+          <div
+            className="crop-box-overlay"
+            style={cropOverlayStyle}
+            onPointerDown={(e) => handleHandlePointerDown('move', e)}
+            onPointerMove={handleHandlePointerMove}
+            onPointerUp={handleHandlePointerUp}
+            onPointerCancel={handleHandlePointerUp}
+          >
+            <div className="crop-box-line n" onPointerDown={(e) => handleHandlePointerDown('n', e)} onPointerMove={handleHandlePointerMove} onPointerUp={handleHandlePointerUp} />
+            <div className="crop-box-line e" onPointerDown={(e) => handleHandlePointerDown('e', e)} onPointerMove={handleHandlePointerMove} onPointerUp={handleHandlePointerUp} />
+            <div className="crop-box-line s" onPointerDown={(e) => handleHandlePointerDown('s', e)} onPointerMove={handleHandlePointerMove} onPointerUp={handleHandlePointerUp} />
+            <div className="crop-box-line w" onPointerDown={(e) => handleHandlePointerDown('w', e)} onPointerMove={handleHandlePointerMove} onPointerUp={handleHandlePointerUp} />
+
+            <div className="crop-box-handle nw" onPointerDown={(e) => handleHandlePointerDown('nw', e)} onPointerMove={handleHandlePointerMove} onPointerUp={handleHandlePointerUp} />
+            <div className="crop-box-handle ne" onPointerDown={(e) => handleHandlePointerDown('ne', e)} onPointerMove={handleHandlePointerMove} onPointerUp={handleHandlePointerUp} />
+            <div className="crop-box-handle se" onPointerDown={(e) => handleHandlePointerDown('se', e)} onPointerMove={handleHandlePointerMove} onPointerUp={handleHandlePointerUp} />
+            <div className="crop-box-handle sw" onPointerDown={(e) => handleHandlePointerDown('sw', e)} onPointerMove={handleHandlePointerMove} onPointerUp={handleHandlePointerUp} />
+          </div>
+        ) : (
+          <span className="crop-guide" aria-hidden="true" />
+        )}
       </div>
       <div className="crop-editor-controls">
-        <span>{cropEnabled ? `缩放 ${transform.scale.toFixed(1)}×` : '完整放入'}</span>
+        <span>{cropEnabled ? `缩放 ${draftTransform.scale.toFixed(1)}×` : '完整放入'}</span>
         <button type="button" disabled={!cropEnabled} onClick={() => adjustScale(-0.1)} aria-label="缩小裁切范围">
           −
         </button>
@@ -194,8 +381,22 @@ export function CropPreview({ sourceUrl, sourceDimensions, grid, fit, transform,
         <button type="button" className="crop-reset" onClick={reset} disabled={!cropEnabled}>
           重置
         </button>
+        {cropEnabled ? (
+          <>
+            <button type="button" className="crop-commit" disabled={!hasDraftChanges} onClick={commit}>
+              确定裁切
+            </button>
+            <button type="button" className="crop-cancel" disabled={!hasDraftChanges} onClick={cancel}>
+              取消
+            </button>
+          </>
+        ) : null}
       </div>
-      <p className="crop-helper">{cropEnabled ? '拖动图片移动取景，滚轮或 ± 调整缩放；双击可重置。' : '选择“居中裁切 · 不变形”后，可把主体移入网格并裁掉边缘内容。'}</p>
+      <p className="crop-helper">
+        {cropEnabled
+          ? '拖动边框/四角手柄调整裁切边缘，拖动图片平移，滚轮或 ± 调整缩放；完成后点击“确定裁切”。'
+          : '选择“居中裁切 · 不变形”后，可拖动边缘手柄裁切原图。'}
+      </p>
     </div>
   );
 }

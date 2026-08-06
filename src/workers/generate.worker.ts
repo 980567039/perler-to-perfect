@@ -10,26 +10,59 @@ function post(message: GenerateResponse, transfer: Transferable[] = []): void {
   workerScope.postMessage(message, transfer);
 }
 
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
 function drawSampledImage(bitmap: ImageBitmap, settings: GenerationSettings): ImageData {
   const width = settings.grid.columns * GENERATION_SAMPLE_SCALE;
   const height = settings.grid.rows * GENERATION_SAMPLE_SCALE;
   const canvas = new OffscreenCanvas(width, height);
   const context = canvas.getContext('2d', { willReadFrequently: true });
   if (!context) throw new Error('无法创建离屏画布。');
-  context.clearRect(0, 0, width, height);
+
+  // Fill white background so that areas not covered by the image become white
+  // beads instead of empty cells (alpha < 128 → null representative).
+  context.fillStyle = '#ffffff';
+  context.fillRect(0, 0, width, height);
+
   context.imageSmoothingEnabled = true;
   context.imageSmoothingQuality = 'high';
 
-  const baseScale =
-    settings.fit === 'contain'
-      ? Math.min(width / bitmap.width, height / bitmap.height)
-      : Math.max(width / bitmap.width, height / bitmap.height);
-  const scale = baseScale * Math.max(0.05, settings.transform.scale);
-  const drawWidth = bitmap.width * scale;
-  const drawHeight = bitmap.height * scale;
-  const drawX = (width - drawWidth) / 2 + settings.transform.offsetX;
-  const drawY = (height - drawHeight) / 2 + settings.transform.offsetY;
-  context.drawImage(bitmap, drawX, drawY, drawWidth, drawHeight);
+  const cropBox = settings.cropBox;
+  if (cropBox && settings.fit === 'crop') {
+    // The crop box is expressed in preview/grid coordinates. Apply the same
+    // crop-mode transform as the preview before mapping the selected region.
+    const baseScale = Math.max(width / bitmap.width, height / bitmap.height);
+    const scale = baseScale * Math.max(0.05, settings.transform.scale);
+    const drawWidth = bitmap.width * scale;
+    const drawHeight = bitmap.height * scale;
+    const drawX = (width - drawWidth) / 2 + settings.transform.offsetX;
+    const drawY = (height - drawHeight) / 2 + settings.transform.offsetY;
+    const sourceX = (cropBox.x * width - drawX) / scale;
+    const sourceY = (cropBox.y * height - drawY) / scale;
+    const sourceWidth = (cropBox.width * width) / scale;
+    const sourceHeight = (cropBox.height * height) / scale;
+    const sx = clamp(sourceX, 0, bitmap.width);
+    const sy = clamp(sourceY, 0, bitmap.height);
+    const ex = clamp(sourceX + sourceWidth, 0, bitmap.width);
+    const ey = clamp(sourceY + sourceHeight, 0, bitmap.height);
+    const sw = Math.max(1, ex - sx);
+    const sh = Math.max(1, ey - sy);
+    context.drawImage(bitmap, sx, sy, sw, sh, 0, 0, width, height);
+  } else {
+    const baseScale =
+      settings.fit === 'contain'
+        ? Math.min(width / bitmap.width, height / bitmap.height)
+        : Math.max(width / bitmap.width, height / bitmap.height);
+    const scale = baseScale * Math.max(0.05, settings.transform.scale);
+    const drawWidth = bitmap.width * scale;
+    const drawHeight = bitmap.height * scale;
+    const drawX = (width - drawWidth) / 2 + settings.transform.offsetX;
+    const drawY = (height - drawHeight) / 2 + settings.transform.offsetY;
+    context.drawImage(bitmap, drawX, drawY, drawWidth, drawHeight);
+  }
+
   return context.getImageData(0, 0, width, height);
 }
 

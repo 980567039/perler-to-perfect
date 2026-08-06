@@ -49,6 +49,21 @@ export interface PaletteManifest {
   colors: BeadColor[];
 }
 
+/**
+ * Crop box in normalized preview/grid coordinates (0–1).
+ * Defines which portion of the framed image is mapped into the grid.
+ */
+export interface CropBox {
+  /** Left edge, 0 = preview left, 1 = preview right */
+  x: number;
+  /** Top edge, 0 = preview top, 1 = preview bottom */
+  y: number;
+  /** Width fraction, must be > 0 */
+  width: number;
+  /** Height fraction, must be > 0 */
+  height: number;
+}
+
 export interface GenerationSettings {
   grid: GridSize;
   fit: 'contain' | 'crop';
@@ -57,6 +72,8 @@ export interface GenerationSettings {
     offsetX: number;
     offsetY: number;
   };
+  /** Optional crop box in normalized image coordinates; used when fit === 'crop' */
+  cropBox?: CropBox;
   maxUsedColors: number;
   enabledColorIds: string[];
   lockedColorIds: string[];

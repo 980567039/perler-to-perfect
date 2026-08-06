@@ -150,7 +150,7 @@ export function App() {
     setSourceBlob(file);
     setSourceUrl(URL.createObjectURL(file));
     setSourceDimensions(dimensions);
-    store.updateSettings({ ...store.settings, transform: { scale: 1, offsetX: 0, offsetY: 0 } });
+    store.updateSettings({ ...store.settings, transform: { scale: 1, offsetX: 0, offsetY: 0 }, cropBox: undefined });
     store.setSource({ fileName: file.name, mimeType: file.type, sha256 });
     store.setProjectName(file.name.replace(/\.[^.]+$/, '') || '未命名拼豆图纸');
     setNotice(`已载入 ${dimensions.width}×${dimensions.height}，图片仅在本机处理。`);
@@ -355,7 +355,12 @@ export function App() {
                 grid={store.settings.grid}
                 fit={store.settings.fit}
                 transform={store.settings.transform}
-                onChange={(transform) => updateSetting({ transform })}
+                cropBox={store.settings.cropBox}
+                onCommit={({ transform, cropBox }) => {
+                  updateSetting({ transform, cropBox });
+                  setNotice('裁切已确认，请点击“生成严格网格图纸”应用到图纸。');
+                }}
+                onCancel={() => setNotice('已取消本次裁切调整。')}
               />
             ) : null}
             <div className="field-row two-columns">
