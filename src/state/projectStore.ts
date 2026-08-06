@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { countCells, detectBorderBackground } from '../domain/grid';
+import { countCells, detectBorderBackground, findLargestNonEmptyRegion, findMagicWandRegion } from '../domain/grid';
 import { MARD_STANDARD_221_PALETTE } from '../domain/mardPalette';
 import {
   EMPTY_CELL,
@@ -47,6 +47,8 @@ interface ProjectState {
   updateSettings: (settings: GenerationSettings) => void;
   setPattern: (result: PatternResult) => void;
   paintCells: (indices: number[], value: number) => void;
+  magicWand: (index: number) => number;
+  keepLargestComponent: () => number;
   undo: () => void;
   redo: () => void;
   previewBorderBackground: () => void;
@@ -162,6 +164,25 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       backgroundPreview: [],
       revision: state.revision + 1,
     });
+  },
+
+  magicWand: (index) => {
+    const state = get();
+    if (!state.cells) return 0;
+    const region = findMagicWandRegion(state.cells, state.settings.grid, index);
+    if (region.length === 0) return 0;
+    state.paintCells(region, EMPTY_CELL);
+    return region.length;
+  },
+
+  keepLargestComponent: () => {
+    const state = get();
+    if (!state.cells) return 0;
+    const largest = new Set(findLargestNonEmptyRegion(state.cells, state.settings.grid));
+    const removable = [...state.cells.keys()].filter((index) => state.cells?.[index] !== EMPTY_CELL && !largest.has(index));
+    if (removable.length === 0) return 0;
+    state.paintCells(removable, EMPTY_CELL);
+    return removable.length;
   },
 
   undo: () => {

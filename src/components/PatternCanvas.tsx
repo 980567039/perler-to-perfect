@@ -3,7 +3,12 @@ import { contrastTextColor } from '../domain/color';
 import { EMPTY_CELL, type GridSize, type PaletteManifest } from '../domain/types';
 import { drawWatermark } from '../rendering/watermark';
 
-export type EditorTool = 'paint' | 'eyedropper' | 'erase' | 'pan';
+export type EditorTool = 'paint' | 'eyedropper' | 'wand' | 'lasso' | 'erase' | 'pan';
+
+interface CanvasPoint {
+  x: number;
+  y: number;
+}
 
 interface PatternCanvasProps {
   cells: Uint16Array;
@@ -16,6 +21,7 @@ interface PatternCanvasProps {
   watermarkEnabled: boolean;
   onPaint: (indices: number[], value: number) => void;
   onPickColor: (paletteIndex: number | null) => void;
+  onMagicWand: (index: number) => void;
 }
 
 interface Viewport {
@@ -35,6 +41,7 @@ export function PatternCanvas({
   watermarkEnabled,
   onPaint,
   onPickColor,
+  onMagicWand,
 }: PatternCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -48,8 +55,10 @@ export function PatternCanvas({
     originX: number;
     originY: number;
     indices: Set<number>;
+    path: CanvasPoint[];
   } | null>(null);
   const previewSet = useMemo(() => new Set(backgroundPreview), [backgroundPreview]);
+  const [lassoPath, setLassoPath] = useState<CanvasPoint[]>([]);
 
   const fit = useCallback(() => {
     const padding = 32;
@@ -206,7 +215,22 @@ export function PatternCanvas({
         context.fillText(label.toString(), leftLabelX, offsetY + (row + 0.5) * scale);
       }
     }
-  }, [backgroundPreview, cells, grid, palette.colors, previewMode, previewSet, size, viewport, watermarkEnabled]);
+
+    if (!previewMode && lassoPath.length > 1) {
+      context.save();
+      context.strokeStyle = '#2563EB';
+      context.fillStyle = 'rgba(37, 99, 235, 0.12)';
+      context.lineWidth = 2;
+      context.setLineDash([7, 5]);
+      context.beginPath();
+      context.moveTo(lassoPath[0]?.x ?? 0, lassoPath[0]?.y ?? 0);
+      lassoPath.slice(1).forEach((point) => context.lineTo(point.x, point.y));
+      context.closePath();
+      context.stroke();
+      context.fill();
+      context.restore();
+    }
+  }, [backgroundPreview, cells, grid, lassoPath, palette.colors, previewMode, previewSet, size, viewport, watermarkEnabled]);
 
   const eventCell = (event: React.PointerEvent<HTMLCanvasElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
@@ -232,6 +256,16 @@ export function PatternCanvas({
       }
       return;
     }
+    if (mode === 'wand') {
+      if (cell) onMagicWand(cell.index);
+      dragRef.current = null;
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+      return;
+    }
+    const point = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+    setLassoPath(mode === 'lasso' ? [point] : []);
     dragRef.current = {
       mode,
       startX: event.clientX - rect.left,
@@ -239,6 +273,7 @@ export function PatternCanvas({
       originX: viewport.offsetX,
       originY: viewport.offsetY,
       indices: new Set(cell && mode !== 'pan' ? [cell.index] : []),
+      path: mode === 'lasso' ? [point] : [],
     };
   };
 
@@ -254,6 +289,9 @@ export function PatternCanvas({
         offsetX: drag.originX + (event.clientX - rect.left - drag.startX),
         offsetY: drag.originY + (event.clientY - rect.top - drag.startY),
       }));
+    } else if (drag.mode === 'lasso') {
+      drag.path.push({ x: event.clientX - rect.left, y: event.clientY - rect.top });
+      setLassoPath([...drag.path]);
     } else if (cell) {
       drag.indices.add(cell.index);
     }
@@ -263,9 +301,32 @@ export function PatternCanvas({
     const drag = dragRef.current;
     dragRef.current = null;
     if (!drag) return;
-    if (drag.mode !== 'pan' && drag.indices.size > 0) {
+    if (drag.mode === 'lasso' && drag.path.length >= 3) {
+      const selected = new Set<number>();
+      for (let row = 0; row < grid.rows; row += 1) {
+        for (let column = 0; column < grid.columns; column += 1) {
+          const point = { x: viewport.offsetX + (column + 0.5) * viewport.scale, y: viewport.offsetY + (row + 0.5) * viewport.scale };
+          let inside = false;
+          for (let index = 0, previous = drag.path.length - 1; index < drag.path.length; previous = index++) {
+            const currentPoint = drag.path[index];
+            const previousPoint = drag.path[previous];
+            if (!currentPoint || !previousPoint) continue;
+            const intersects =
+              currentPoint.y > point.y !== previousPoint.y > point.y &&
+              point.x <
+                ((previousPoint.x - currentPoint.x) * (point.y - currentPoint.y)) /
+                  (previousPoint.y - currentPoint.y) +
+                  currentPoint.x;
+            if (intersects) inside = !inside;
+          }
+          if (inside) selected.add(row * grid.columns + column);
+        }
+      }
+      if (selected.size > 0) onPaint([...selected], EMPTY_CELL);
+    } else if (drag.mode !== 'lasso' && drag.mode !== 'pan' && drag.indices.size > 0) {
       onPaint([...drag.indices], drag.mode === 'erase' ? EMPTY_CELL : selectedPaletteIndex);
     }
+    setLassoPath([]);
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
@@ -296,6 +357,7 @@ export function PatternCanvas({
         onPointerMove={handlePointerMove}
         onPointerLeave={() => setCursorCell(null)}
         onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
         onWheel={handleWheel}
       />
       <div className="canvas-hud">

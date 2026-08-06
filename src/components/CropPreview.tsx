@@ -5,7 +5,7 @@ import type { CropBox, GenerationSettings, GridSize } from '../domain/types';
 
 const PREVIEW_MAX_WIDTH = 258;
 const PREVIEW_MAX_HEIGHT = 220;
-const MIN_CROP_SCALE = 1;
+const MIN_CROP_SCALE = 0.5;
 const MAX_CROP_SCALE = 4;
 
 type CropTransform = GenerationSettings['transform'];

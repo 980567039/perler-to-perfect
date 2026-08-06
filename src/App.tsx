@@ -228,6 +228,26 @@ export function App() {
     setNotice(`已吸取色号 ${color.code}，当前画笔颜色已更新；点击“画笔”结束吸色。`);
   };
 
+  const handleMagicWand = (index: number) => {
+    const removed = store.magicWand(index);
+    if (removed > 0) {
+      setError(null);
+      setNotice(`魔棒已擦除连续同色区域：${removed} 格；可继续点击其他杂物，支持撤销。`);
+    } else {
+      setError('魔棒请点击有颜色的连续区域。');
+    }
+  };
+
+  const handleKeepLargestComponent = () => {
+    const removed = store.keepLargestComponent();
+    if (removed > 0) {
+      setError(null);
+      setNotice(`已仅保留最大主体，清除 ${removed} 格外围杂物；如需恢复可撤销。`);
+    } else {
+      setNotice('未发现主体外的独立杂物。');
+    }
+  };
+
   const handlePaletteFile = async (file: File) => {
     setError(null);
     try {
@@ -484,6 +504,8 @@ export function App() {
                 [
                   ['paint', '画笔'],
                   ['eyedropper', '吸色'],
+                  ['wand', '魔棒'],
+                  ['lasso', '圈选'],
                   ['erase', '橡皮'],
                   ['pan', '平移'],
                 ] as const
@@ -538,12 +560,18 @@ export function App() {
                 watermarkEnabled={store.watermarkEnabled}
                 onPaint={store.paintCells}
                 onPickColor={handlePickColor}
+                onMagicWand={handleMagicWand}
               />
               <div className="background-actions">
                 {store.backgroundPreview.length === 0 ? (
-                  <button type="button" className="secondary-button" onClick={store.previewBorderBackground}>
-                    预览边缘背景
-                  </button>
+                  <>
+                    <button type="button" className="secondary-button" onClick={store.previewBorderBackground}>
+                      预览边缘背景
+                    </button>
+                    <button type="button" className="danger-button" onClick={handleKeepLargestComponent}>
+                      仅保留主体
+                    </button>
+                  </>
                 ) : (
                   <>
                     <span>候选空格：{store.backgroundPreview.length}</span>
@@ -552,6 +580,9 @@ export function App() {
                     </button>
                     <button type="button" className="secondary-button" onClick={store.cancelBackgroundPreview}>
                       取消
+                    </button>
+                    <button type="button" className="danger-button" onClick={handleKeepLargestComponent}>
+                      仅保留主体
                     </button>
                   </>
                 )}

@@ -147,3 +147,58 @@ export function detectBorderBackground(cells: Uint16Array, grid: GridSize): numb
   }
   return result.sort((a, b) => a - b);
 }
+
+function connectedRegion(
+  cells: Uint16Array,
+  grid: GridSize,
+  startIndex: number,
+  matches: (value: number, startValue: number) => boolean,
+): number[] {
+  if (startIndex < 0 || startIndex >= cells.length) return [];
+  const startValue = cells[startIndex];
+  if (startValue === undefined || startValue === EMPTY_CELL) return [];
+
+  const { columns, rows } = grid;
+  const visited = new Uint8Array(cells.length);
+  const stack = [startIndex];
+  const result: number[] = [];
+  visited[startIndex] = 1;
+
+  while (stack.length > 0) {
+    const index = stack.pop();
+    if (index === undefined) break;
+    const value = cells[index];
+    if (value === undefined || !matches(value, startValue)) continue;
+    result.push(index);
+    const row = Math.floor(index / columns);
+    const column = index % columns;
+    for (const [rowOffset, columnOffset] of [[-1, 0], [1, 0], [0, -1], [0, 1]] as const) {
+      const nextRow = row + rowOffset;
+      const nextColumn = column + columnOffset;
+      if (nextRow < 0 || nextRow >= rows || nextColumn < 0 || nextColumn >= columns) continue;
+      const next = nextRow * columns + nextColumn;
+      if (visited[next] === 1) continue;
+      visited[next] = 1;
+      if (cells[next] !== EMPTY_CELL) stack.push(next);
+    }
+  }
+  return result.sort((a, b) => a - b);
+}
+
+/** Returns the contiguous region of the exact same palette color as the clicked cell. */
+export function findMagicWandRegion(cells: Uint16Array, grid: GridSize, startIndex: number): number[] {
+  return connectedRegion(cells, grid, startIndex, (value, startValue) => value === startValue);
+}
+
+/** Returns the largest contiguous non-empty component, regardless of palette color. */
+export function findLargestNonEmptyRegion(cells: Uint16Array, grid: GridSize): number[] {
+  let largest: number[] = [];
+  const visited = new Uint8Array(cells.length);
+  for (let index = 0; index < cells.length; index += 1) {
+    if (visited[index] === 1 || cells[index] === EMPTY_CELL) continue;
+    const region = connectedRegion(cells, grid, index, (value) => value !== EMPTY_CELL);
+    region.forEach((regionIndex) => (visited[regionIndex] = 1));
+    if (region.length > largest.length) largest = region;
+  }
+  return largest;
+}

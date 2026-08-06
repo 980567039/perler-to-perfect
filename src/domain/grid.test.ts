@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { DEVELOPMENT_PALETTE } from './devPalette';
-import { countCells, decodeCellsRle, detectBorderBackground, encodeCellsRle, validateGridSize } from './grid';
+import {
+  countCells,
+  decodeCellsRle,
+  detectBorderBackground,
+  encodeCellsRle,
+  findLargestNonEmptyRegion,
+  findMagicWandRegion,
+  validateGridSize,
+} from './grid';
 import { EMPTY_CELL } from './types';
 
 describe('grid model', () => {
@@ -37,5 +45,26 @@ describe('grid model', () => {
     expect(detected.has(5)).toBe(false);
     expect(detected.has(10)).toBe(true);
     expect(detected.size).toBe(13);
+  });
+
+  it('finds only the contiguous same-color region for the magic wand', () => {
+    const cells = new Uint16Array([
+      0, 0, EMPTY_CELL, 1,
+      0, EMPTY_CELL, EMPTY_CELL, 1,
+      EMPTY_CELL, 0, 0, EMPTY_CELL,
+    ]);
+
+    expect(findMagicWandRegion(cells, { columns: 4, rows: 3 }, 0)).toEqual([0, 1, 4]);
+    expect(findMagicWandRegion(cells, { columns: 4, rows: 3 }, 3)).toEqual([3, 7]);
+  });
+
+  it('finds the largest connected non-empty component across colors', () => {
+    const cells = new Uint16Array([
+      0, 0, EMPTY_CELL, 1,
+      0, 2, EMPTY_CELL, 1,
+      EMPTY_CELL, EMPTY_CELL, EMPTY_CELL, EMPTY_CELL,
+    ]);
+
+    expect(findLargestNonEmptyRegion(cells, { columns: 4, rows: 3 })).toEqual([0, 1, 4, 5]);
   });
 });
