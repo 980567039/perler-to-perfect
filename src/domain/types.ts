@@ -72,7 +72,7 @@ export interface GenerationSettings {
     offsetX: number;
     offsetY: number;
   };
-  /** Optional crop box in normalized image coordinates; used when fit === 'crop' */
+  /** Optional crop box in normalized preview/grid coordinates. */
   cropBox?: CropBox;
   maxUsedColors: number;
   enabledColorIds: string[];
@@ -160,7 +160,7 @@ export const DEFAULT_GRID: GridSize = { columns: 104, rows: 104 };
 export function createDefaultSettings(palette: PaletteManifest): GenerationSettings {
   return {
     grid: { ...DEFAULT_GRID },
-    fit: 'contain',
+    fit: 'crop',
     transform: { scale: 1, offsetX: 0, offsetY: 0 },
     maxUsedColors: 16,
     enabledColorIds: palette.colors.map((color) => color.id),

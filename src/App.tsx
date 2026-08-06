@@ -150,7 +150,12 @@ export function App() {
     setSourceBlob(file);
     setSourceUrl(URL.createObjectURL(file));
     setSourceDimensions(dimensions);
-    store.updateSettings({ ...store.settings, transform: { scale: 1, offsetX: 0, offsetY: 0 }, cropBox: undefined });
+    store.updateSettings({
+      ...store.settings,
+      fit: 'crop',
+      transform: { scale: 1, offsetX: 0, offsetY: 0 },
+      cropBox: undefined,
+    });
     store.setSource({ fileName: file.name, mimeType: file.type, sha256 });
     store.setProjectName(file.name.replace(/\.[^.]+$/, '') || '未命名拼豆图纸');
     setNotice(`已载入 ${dimensions.width}×${dimensions.height}，图片仅在本机处理。`);
@@ -353,7 +358,6 @@ export function App() {
                 sourceUrl={sourceUrl}
                 sourceDimensions={sourceDimensions}
                 grid={store.settings.grid}
-                fit={store.settings.fit}
                 transform={store.settings.transform}
                 cropBox={store.settings.cropBox}
                 onCommit={({ transform, cropBox }) => {
@@ -391,13 +395,6 @@ export function App() {
                 />
               </label>
             </div>
-            <label className="field-stack">
-              原图适配
-              <select value={store.settings.fit} onChange={(event) => updateSetting({ fit: event.target.value as 'contain' | 'crop' })}>
-                <option value="contain">完整放入 · 空格补边</option>
-                <option value="crop">居中裁切 · 不变形</option>
-              </select>
-            </label>
           </section>
 
           <section>

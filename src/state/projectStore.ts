@@ -211,7 +211,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
 
   loadProject: (project) => {
-    const settings = { ...project.settings, detailPriority: project.settings.detailPriority ?? true };
+    const settings = { ...project.settings, fit: 'crop' as const, detailPriority: project.settings.detailPriority ?? true };
     const cells = decodeCellsRle(project.cellsRle, settings.grid.columns * settings.grid.rows);
     const { counts, totalBeads } = countCells(cells, settings.grid, project.palette);
     set({

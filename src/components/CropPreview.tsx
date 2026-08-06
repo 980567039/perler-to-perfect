@@ -14,7 +14,6 @@ interface CropPreviewProps {
   sourceUrl: string;
   sourceDimensions: { width: number; height: number };
   grid: GridSize;
-  fit: GenerationSettings['fit'];
   transform: CropTransform;
   cropBox?: CropBox;
   onCommit: (change: { transform: CropTransform; cropBox: CropBox | undefined }) => void;
@@ -67,21 +66,19 @@ export function getCropPreviewSize(grid: GridSize): PreviewSize {
 function getBaseScale(
   sourceDimensions: { width: number; height: number },
   previewSize: PreviewSize,
-  fit: GenerationSettings['fit'],
 ): number {
   const widthScale = previewSize.width / sourceDimensions.width;
   const heightScale = previewSize.height / sourceDimensions.height;
-  return fit === 'contain' ? Math.min(widthScale, heightScale) : Math.max(widthScale, heightScale);
+  return Math.max(widthScale, heightScale);
 }
 
 function getImageLayout(
   sourceDimensions: { width: number; height: number },
   grid: GridSize,
-  fit: GenerationSettings['fit'],
   transform: CropTransform,
   previewSize: PreviewSize,
 ): ImageLayout {
-  const baseScale = getBaseScale(sourceDimensions, previewSize, fit);
+  const baseScale = getBaseScale(sourceDimensions, previewSize);
   const scale = baseScale * Math.max(0.05, transform.scale);
   const width = sourceDimensions.width * scale;
   const height = sourceDimensions.height * scale;
@@ -103,7 +100,7 @@ export function clampCropTransform(
   previewSize = getCropPreviewSize(grid),
 ): CropTransform {
   const scale = clamp(Number.isFinite(transform.scale) ? transform.scale : MIN_CROP_SCALE, MIN_CROP_SCALE, MAX_CROP_SCALE);
-  const layout = getImageLayout(sourceDimensions, grid, 'crop', { ...transform, scale }, previewSize);
+  const layout = getImageLayout(sourceDimensions, grid, { ...transform, scale }, previewSize);
   const offsetScaleX = previewSize.width / (grid.columns * GENERATION_SAMPLE_SCALE);
   const offsetScaleY = previewSize.height / (grid.rows * GENERATION_SAMPLE_SCALE);
   const maxOffsetX = Math.max(0, (layout.width - previewSize.width) / 2 / offsetScaleX);
@@ -120,7 +117,6 @@ export function CropPreview({
   sourceUrl,
   sourceDimensions,
   grid,
-  fit,
   transform,
   cropBox,
   onCommit,
@@ -138,26 +134,19 @@ export function CropPreview({
   const [draftCropBox, setDraftCropBox] = useState<CropBox>(() => ({ ...(cropBox ?? FULL_CROP_BOX) }));
 
   const previewSize = useMemo(() => getCropPreviewSize(grid), [grid.columns, grid.rows]);
-  const cropEnabled = fit === 'crop';
-
   useEffect(() => {
     setDraftTransform({ ...transform });
     setDraftCropBox({ ...(cropBox ?? FULL_CROP_BOX) });
-  }, [cropBox, cropEnabled, transform]);
+  }, [cropBox, transform]);
 
-  const previewTransform = cropEnabled ? draftTransform : transform;
   const imageLayout = useMemo(
-    () => getImageLayout(sourceDimensions, grid, fit, previewTransform, previewSize),
-    [fit, grid, previewSize, previewTransform, sourceDimensions],
+    () => getImageLayout(sourceDimensions, grid, draftTransform, previewSize),
+    [draftTransform, grid, previewSize, sourceDimensions],
   );
 
-  const effectiveCropBox: CropBox = useMemo(() => {
-    return cropEnabled ? draftCropBox : FULL_CROP_BOX;
-  }, [cropEnabled, draftCropBox]);
+  const effectiveCropBox: CropBox = useMemo(() => draftCropBox, [draftCropBox]);
 
-  const hasDraftChanges =
-    cropEnabled &&
-    (!sameTransform(draftTransform, transform) || !sameCropBox(draftCropBox, cropBox ?? FULL_CROP_BOX));
+  const hasDraftChanges = !sameTransform(draftTransform, transform) || !sameCropBox(draftCropBox, cropBox ?? FULL_CROP_BOX);
 
   const reset = () => {
     setDraftTransform({ scale: MIN_CROP_SCALE, offsetX: 0, offsetY: 0 });
@@ -174,7 +163,7 @@ export function CropPreview({
   };
 
   const handleHandlePointerDown = (handle: HandleType, event: PointerEvent<HTMLDivElement>) => {
-    if (!cropEnabled || event.button !== 0) return;
+    if (event.button !== 0) return;
     event.stopPropagation();
     event.currentTarget.setPointerCapture(event.pointerId);
     handlePointerStart.current = {
@@ -263,7 +252,7 @@ export function CropPreview({
   };
 
   const handlePointerDown = (event: PointerEvent<HTMLDivElement>) => {
-    if (!cropEnabled || event.button !== 0) return;
+    if (event.button !== 0) return;
     event.currentTarget.setPointerCapture(event.pointerId);
     pointerStart.current = {
       pointerId: event.pointerId,
@@ -297,7 +286,6 @@ export function CropPreview({
   };
 
   const handleWheel = (event: WheelEvent<HTMLDivElement>) => {
-    if (!cropEnabled) return;
     event.preventDefault();
     adjustScale(event.deltaY < 0 ? 0.1 : -0.1);
   };
@@ -327,19 +315,19 @@ export function CropPreview({
     <div className="crop-editor">
       <div className="crop-editor-heading">
         <strong>裁切取景</strong>
-        <span>{cropEnabled ? '拖动边框手柄精细裁切' : '切换到居中裁切后可调整'}</span>
+        <span>拖动边框手柄精细裁切</span>
       </div>
       <div
-        className={`crop-viewport ${cropEnabled ? 'is-cropping' : 'is-contained'}`}
+        className="crop-viewport is-cropping"
         style={{ width: previewSize.width, height: previewSize.height }}
-        onDoubleClick={cropEnabled ? reset : undefined}
+        onDoubleClick={reset}
         onPointerCancel={releasePointer}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={releasePointer}
         onWheel={handleWheel}
         role="img"
-        aria-label={cropEnabled ? '拖动边缘手柄或图片调整裁切范围' : '原图适配预览'}
+        aria-label="拖动边缘手柄或图片调整裁切范围"
       >
         <img
           src={sourceUrl}
@@ -347,55 +335,45 @@ export function CropPreview({
           draggable={false}
           style={{ width: imageLayout.width, height: imageLayout.height, left: imageLayout.left, top: imageLayout.top }}
         />
-        {cropEnabled ? (
-          <div
-            className="crop-box-overlay"
-            style={cropOverlayStyle}
-            onPointerDown={(e) => handleHandlePointerDown('move', e)}
-            onPointerMove={handleHandlePointerMove}
-            onPointerUp={handleHandlePointerUp}
-            onPointerCancel={handleHandlePointerUp}
-          >
-            <div className="crop-box-line n" onPointerDown={(e) => handleHandlePointerDown('n', e)} onPointerMove={handleHandlePointerMove} onPointerUp={handleHandlePointerUp} />
-            <div className="crop-box-line e" onPointerDown={(e) => handleHandlePointerDown('e', e)} onPointerMove={handleHandlePointerMove} onPointerUp={handleHandlePointerUp} />
-            <div className="crop-box-line s" onPointerDown={(e) => handleHandlePointerDown('s', e)} onPointerMove={handleHandlePointerMove} onPointerUp={handleHandlePointerUp} />
-            <div className="crop-box-line w" onPointerDown={(e) => handleHandlePointerDown('w', e)} onPointerMove={handleHandlePointerMove} onPointerUp={handleHandlePointerUp} />
+        <div
+          className="crop-box-overlay"
+          style={cropOverlayStyle}
+          onPointerDown={(e) => handleHandlePointerDown('move', e)}
+          onPointerMove={handleHandlePointerMove}
+          onPointerUp={handleHandlePointerUp}
+          onPointerCancel={handleHandlePointerUp}
+        >
+          <div className="crop-box-line n" onPointerDown={(e) => handleHandlePointerDown('n', e)} onPointerMove={handleHandlePointerMove} onPointerUp={handleHandlePointerUp} />
+          <div className="crop-box-line e" onPointerDown={(e) => handleHandlePointerDown('e', e)} onPointerMove={handleHandlePointerMove} onPointerUp={handleHandlePointerUp} />
+          <div className="crop-box-line s" onPointerDown={(e) => handleHandlePointerDown('s', e)} onPointerMove={handleHandlePointerMove} onPointerUp={handleHandlePointerUp} />
+          <div className="crop-box-line w" onPointerDown={(e) => handleHandlePointerDown('w', e)} onPointerMove={handleHandlePointerMove} onPointerUp={handleHandlePointerUp} />
 
-            <div className="crop-box-handle nw" onPointerDown={(e) => handleHandlePointerDown('nw', e)} onPointerMove={handleHandlePointerMove} onPointerUp={handleHandlePointerUp} />
-            <div className="crop-box-handle ne" onPointerDown={(e) => handleHandlePointerDown('ne', e)} onPointerMove={handleHandlePointerMove} onPointerUp={handleHandlePointerUp} />
-            <div className="crop-box-handle se" onPointerDown={(e) => handleHandlePointerDown('se', e)} onPointerMove={handleHandlePointerMove} onPointerUp={handleHandlePointerUp} />
-            <div className="crop-box-handle sw" onPointerDown={(e) => handleHandlePointerDown('sw', e)} onPointerMove={handleHandlePointerMove} onPointerUp={handleHandlePointerUp} />
-          </div>
-        ) : (
-          <span className="crop-guide" aria-hidden="true" />
-        )}
+          <div className="crop-box-handle nw" onPointerDown={(e) => handleHandlePointerDown('nw', e)} onPointerMove={handleHandlePointerMove} onPointerUp={handleHandlePointerUp} />
+          <div className="crop-box-handle ne" onPointerDown={(e) => handleHandlePointerDown('ne', e)} onPointerMove={handleHandlePointerMove} onPointerUp={handleHandlePointerUp} />
+          <div className="crop-box-handle se" onPointerDown={(e) => handleHandlePointerDown('se', e)} onPointerMove={handleHandlePointerMove} onPointerUp={handleHandlePointerUp} />
+          <div className="crop-box-handle sw" onPointerDown={(e) => handleHandlePointerDown('sw', e)} onPointerMove={handleHandlePointerMove} onPointerUp={handleHandlePointerUp} />
+        </div>
       </div>
       <div className="crop-editor-controls">
-        <span>{cropEnabled ? `缩放 ${draftTransform.scale.toFixed(1)}×` : '完整放入'}</span>
-        <button type="button" disabled={!cropEnabled} onClick={() => adjustScale(-0.1)} aria-label="缩小裁切范围">
+        <span>{`缩放 ${draftTransform.scale.toFixed(1)}×`}</span>
+        <button type="button" onClick={() => adjustScale(-0.1)} aria-label="缩小裁切范围">
           −
         </button>
-        <button type="button" disabled={!cropEnabled} onClick={() => adjustScale(0.1)} aria-label="放大裁切范围">
+        <button type="button" onClick={() => adjustScale(0.1)} aria-label="放大裁切范围">
           +
         </button>
-        <button type="button" className="crop-reset" onClick={reset} disabled={!cropEnabled}>
+        <button type="button" className="crop-reset" onClick={reset}>
           重置
         </button>
-        {cropEnabled ? (
-          <>
-            <button type="button" className="crop-commit" disabled={!hasDraftChanges} onClick={commit}>
-              确定裁切
-            </button>
-            <button type="button" className="crop-cancel" disabled={!hasDraftChanges} onClick={cancel}>
-              取消
-            </button>
-          </>
-        ) : null}
+        <button type="button" className="crop-commit" disabled={!hasDraftChanges} onClick={commit}>
+          确定裁切
+        </button>
+        <button type="button" className="crop-cancel" disabled={!hasDraftChanges} onClick={cancel}>
+          取消
+        </button>
       </div>
       <p className="crop-helper">
-        {cropEnabled
-          ? '拖动边框/四角手柄调整裁切边缘，拖动图片平移，滚轮或 ± 调整缩放；完成后点击“确定裁切”。'
-          : '选择“居中裁切 · 不变形”后，可拖动边缘手柄裁切原图。'}
+        拖动边框/四角手柄调整裁切边缘，拖动图片平移，滚轮或 ± 调整缩放；完成后点击“确定裁切”。
       </p>
     </div>
   );

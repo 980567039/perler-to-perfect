@@ -284,21 +284,6 @@ button:disabled {
   user-select: none;
 }
 
-.crop-guide {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  border: 1px solid rgba(255, 255, 255, 0.74);
-  background:
-    linear-gradient(90deg, transparent 32.9%, rgba(255, 255, 255, 0.26) 33%, transparent 33.3%, transparent 66.2%, rgba(255, 255, 255, 0.26) 66.5%, transparent 66.8%),
-    linear-gradient(0deg, transparent 32.9%, rgba(255, 255, 255, 0.26) 33%, transparent 33.3%, transparent 66.2%, rgba(255, 255, 255, 0.26) 66.5%, transparent 66.8%);
-}
-
-.crop-viewport.is-contained .crop-guide {
-  border-style: dashed;
-  opacity: 0.65;
-}
-
 .crop-box-overlay {
   position: absolute;
   box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.55);
