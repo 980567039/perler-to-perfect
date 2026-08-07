@@ -11,11 +11,22 @@ import {
 } from './types';
 
 const SAMPLE_SCALE = 4;
+const MIN_MEAN_PALETTE_GAIN = 0.1;
+const CLOSE_COLOR_REGIONAL_SUPPORT = 0.08;
+const CLOSE_COLOR_MIN_MEAN_GAIN = 0.25;
+const STRUCTURAL_DETAIL_MIN_DELTA_E = 8;
+const STRUCTURAL_DETAIL_SUPPORT_RATIO = 0.0005;
+const LOW_CONTRAST_CLEANUP_DELTA_E = 10;
+const DETAIL_EDGE_PROTECTION_DELTA_E = 9;
+const STANDARD_EDGE_PROTECTION_DELTA_E = 15;
+const CLEANUP_PASSES = 2;
 
 interface RepresentativeCell {
   bucketKey: number;
   rgb: RgbColor;
+  lab: LabColor;
   detailWeight: number;
+  edgeStrength: number;
 }
 
 interface HistogramBucket {
@@ -23,6 +34,7 @@ interface HistogramBucket {
   rgb: RgbColor;
   lab: LabColor;
   weight: number;
+  edgeWeight: number;
 }
 
 export interface GenerationProgress {
@@ -125,13 +137,40 @@ function representativeForCell(
     b: Math.round(winning.b / winning.count),
   };
   const detailWeight = detailPriority ? 1 + Math.min(2, (maximumLuminance - minimumLuminance) / 128) : 1;
-  return { bucketKey: colorBucketKey(rgb), rgb, detailWeight };
+  return { bucketKey: colorBucketKey(rgb), rgb, lab: rgbToLab(rgb), detailWeight, edgeStrength: 0 };
+}
+
+function annotateEdgeStrength(representatives: Array<RepresentativeCell | null>, grid: GridSize): void {
+  const { columns, rows } = grid;
+  for (let index = 0; index < representatives.length; index += 1) {
+    const representative = representatives[index];
+    if (!representative) continue;
+    const row = Math.floor(index / columns);
+    const column = index % columns;
+    let edgeStrength = 0;
+    const neighbors = [
+      row > 0 ? index - columns : -1,
+      row + 1 < rows ? index + columns : -1,
+      column > 0 ? index - 1 : -1,
+      column + 1 < columns ? index + 1 : -1,
+    ];
+    for (const neighborIndex of neighbors) {
+      if (neighborIndex < 0) continue;
+      const neighbor = representatives[neighborIndex];
+      if (!neighbor) continue;
+      edgeStrength = Math.max(edgeStrength, deltaE2000(representative.lab, neighbor.lab));
+    }
+    representative.edgeStrength = edgeStrength;
+  }
 }
 
 function validateGenerationSettings(settings: GenerationSettings, palette: PaletteManifest): number[] {
   validateGridSize(settings.grid);
   if (!Number.isInteger(settings.maxUsedColors) || settings.maxUsedColors < 2 || settings.maxUsedColors > 64) {
     throw new Error('实际用色上限必须是 2–64 的整数。');
+  }
+  if (!Number.isFinite(settings.minimumPaletteDistance) || settings.minimumPaletteDistance < 0 || settings.minimumPaletteDistance > 12) {
+    throw new Error('相近色合并阈值必须在 0–12 之间。');
   }
   const indexById = new Map(palette.colors.map((color, index) => [color.id, index]));
   const enabled = settings.enabledColorIds.map((id) => indexById.get(id)).filter((value): value is number => value !== undefined);
@@ -154,15 +193,18 @@ function buildHistogram(representatives: Array<RepresentativeCell | null>): {
   buckets: HistogramBucket[];
   bucketIndexByKey: Map<number, number>;
 } {
-  const raw = new Map<number, { r: number; g: number; b: number; count: number; weight: number }>();
+  const raw = new Map<number, { r: number; g: number; b: number; count: number; weight: number; edgeWeight: number }>();
   for (const representative of representatives) {
     if (!representative) continue;
-    const current = raw.get(representative.bucketKey) ?? { r: 0, g: 0, b: 0, count: 0, weight: 0 };
+    const current = raw.get(representative.bucketKey) ?? { r: 0, g: 0, b: 0, count: 0, weight: 0, edgeWeight: 0 };
     current.r += representative.rgb.r;
     current.g += representative.rgb.g;
     current.b += representative.rgb.b;
     current.count += 1;
     current.weight += representative.detailWeight;
+    if (representative.edgeStrength >= STRUCTURAL_DETAIL_MIN_DELTA_E) {
+      current.edgeWeight += representative.detailWeight;
+    }
     raw.set(representative.bucketKey, current);
   }
 
@@ -174,7 +216,7 @@ function buildHistogram(representatives: Array<RepresentativeCell | null>): {
         g: Math.round(value.g / value.count),
         b: Math.round(value.b / value.count),
       };
-      return { key, rgb, lab: rgbToLab(rgb), weight: value.weight };
+      return { key, rgb, lab: rgbToLab(rgb), weight: value.weight, edgeWeight: value.edgeWeight };
     });
   return { buckets, bucketIndexByKey: new Map(buckets.map((bucket, index) => [bucket.key, index])) };
 }
@@ -206,10 +248,11 @@ function selectPaletteIndices(
   palette: PaletteManifest,
   enabledIndices: number[],
   distances: Float32Array,
+  paletteLabs: LabColor[],
   settings: GenerationSettings,
   checkCancelled: () => void,
-): { selectedPaletteIndices: number[]; selectedEnabledIndices: number[] } {
-  if (buckets.length === 0) return { selectedPaletteIndices: [], selectedEnabledIndices: [] };
+): number[] {
+  if (buckets.length === 0) return [];
   const enabledPositionByPaletteIndex = new Map(enabledIndices.map((paletteIndex, position) => [paletteIndex, position]));
   const paletteIndexById = new Map(palette.colors.map((color, index) => [color.id, index]));
   const selectedEnabledIndices: number[] = [];
@@ -234,14 +277,20 @@ function selectPaletteIndices(
     }
   };
   selectedEnabledIndices.forEach(updateMinDistances);
+  const totalWeight = buckets.reduce((total, bucket) => total + bucket.weight, 0);
 
   while (selectedEnabledIndices.length < settings.maxUsedColors) {
     checkCancelled();
     let bestEnabledPosition = -1;
     let bestScore = selectedEnabledIndices.length === 0 ? Number.POSITIVE_INFINITY : 0;
+    let bestEdgeWeight = 0;
+    let bestMaximumImprovement = 0;
     for (let enabledPosition = 0; enabledPosition < enabledIndices.length; enabledPosition += 1) {
       if (selectedSet.has(enabledPosition)) continue;
       let score = 0;
+      let supportWeight = 0;
+      let edgeWeight = 0;
+      let maximumImprovement = 0;
       for (let bucketIndex = 0; bucketIndex < buckets.length; bucketIndex += 1) {
         const bucket = buckets[bucketIndex];
         if (!bucket) continue;
@@ -249,9 +298,31 @@ function selectPaletteIndices(
         if (selectedEnabledIndices.length === 0) {
           score += distance * bucket.weight;
         } else {
-          score += Math.max(0, (minDistances[bucketIndex] ?? Number.POSITIVE_INFINITY) - distance) * bucket.weight;
+          const improvement = Math.max(0, (minDistances[bucketIndex] ?? Number.POSITIVE_INFINITY) - distance);
+          score += improvement * bucket.weight;
+          if (improvement > 1e-6) {
+            supportWeight += bucket.weight;
+            edgeWeight += bucket.edgeWeight;
+            maximumImprovement = Math.max(maximumImprovement, improvement);
+          }
         }
       }
+
+      if (selectedEnabledIndices.length > 0 && settings.minimumPaletteDistance > 0) {
+        const paletteIndex = enabledIndices[enabledPosition];
+        const candidateLab = paletteIndex === undefined ? undefined : paletteLabs[paletteIndex];
+        let minimumDistance = Number.POSITIVE_INFINITY;
+        for (const selectedEnabledPosition of selectedEnabledIndices) {
+          const selectedPaletteIndex = enabledIndices[selectedEnabledPosition];
+          const selectedLab = selectedPaletteIndex === undefined ? undefined : paletteLabs[selectedPaletteIndex];
+          if (candidateLab && selectedLab) minimumDistance = Math.min(minimumDistance, deltaE2000(candidateLab, selectedLab));
+        }
+        const meanGain = totalWeight > 0 ? score / totalWeight : 0;
+        const supportRatio = totalWeight > 0 ? supportWeight / totalWeight : 0;
+        const hasRegionalNeed = supportRatio >= CLOSE_COLOR_REGIONAL_SUPPORT && meanGain >= CLOSE_COLOR_MIN_MEAN_GAIN;
+        if (minimumDistance < settings.minimumPaletteDistance && !hasRegionalNeed) continue;
+      }
+
       const better =
         selectedEnabledIndices.length === 0
           ? score < bestScore - 1e-6
@@ -259,20 +330,24 @@ function selectPaletteIndices(
       if (better || (Math.abs(score - bestScore) <= 1e-6 && (bestEnabledPosition < 0 || enabledPosition < bestEnabledPosition))) {
         bestScore = score;
         bestEnabledPosition = enabledPosition;
+        bestEdgeWeight = edgeWeight;
+        bestMaximumImprovement = maximumImprovement;
       }
     }
-    if (bestEnabledPosition < 0 || (selectedEnabledIndices.length > 0 && bestScore <= 1e-6)) break;
+    if (bestEnabledPosition < 0) break;
+    if (selectedEnabledIndices.length > 0) {
+      const meanGain = totalWeight > 0 ? bestScore / totalWeight : 0;
+      const minimumStructuralSupport = Math.max(1, totalWeight * STRUCTURAL_DETAIL_SUPPORT_RATIO);
+      const preservesStructure =
+        bestEdgeWeight >= minimumStructuralSupport && bestMaximumImprovement >= STRUCTURAL_DETAIL_MIN_DELTA_E;
+      if (bestScore <= 1e-6 || (meanGain < MIN_MEAN_PALETTE_GAIN && !preservesStructure)) break;
+    }
     selectedSet.add(bestEnabledPosition);
     selectedEnabledIndices.push(bestEnabledPosition);
     updateMinDistances(bestEnabledPosition);
   }
 
-  return {
-    selectedEnabledIndices,
-    selectedPaletteIndices: selectedEnabledIndices
-      .map((enabledPosition) => enabledIndices[enabledPosition])
-      .filter((value): value is number => value !== undefined),
-  };
+  return selectedEnabledIndices;
 }
 
 function cleanupSmallRegions(
@@ -281,79 +356,131 @@ function cleanupSmallRegions(
   threshold: number,
   paletteLabs: LabColor[],
   lockedPaletteIndices: Set<number>,
+  representatives: Array<RepresentativeCell | null>,
+  detailPriority: boolean,
 ): Uint16Array {
   if (threshold <= 0) return source;
   const { columns, rows } = grid;
-  const visited = new Uint8Array(source.length);
-  const output = source.slice();
   const neighborOffsets = [
     [-1, 0],
     [1, 0],
     [0, -1],
     [0, 1],
   ] as const;
+  const edgeProtectionThreshold = detailPriority
+    ? DETAIL_EDGE_PROTECTION_DELTA_E
+    : STANDARD_EDGE_PROTECTION_DELTA_E;
+  let output = source.slice();
 
-  for (let start = 0; start < source.length; start += 1) {
-    if (visited[start] === 1) continue;
-    const target = source[start];
-    if (target === undefined || target === EMPTY_CELL) {
+  for (let pass = 0; pass < CLEANUP_PASSES; pass += 1) {
+    const input = output;
+    const nextOutput = input.slice();
+    const visited = new Uint8Array(input.length);
+    let changed = false;
+
+    for (let start = 0; start < input.length; start += 1) {
+      if (visited[start] === 1) continue;
+      const target = input[start];
+      if (target === undefined || target === EMPTY_CELL) {
+        visited[start] = 1;
+        continue;
+      }
+      const stack = [start];
+      const region: number[] = [];
       visited[start] = 1;
-      continue;
-    }
-    const stack = [start];
-    const region: number[] = [];
-    visited[start] = 1;
-    while (stack.length > 0) {
-      const index = stack.pop();
-      if (index === undefined) break;
-      region.push(index);
-      const row = Math.floor(index / columns);
-      const column = index % columns;
-      for (const [rowOffset, columnOffset] of neighborOffsets) {
-        const nextRow = row + rowOffset;
-        const nextColumn = column + columnOffset;
-        if (nextRow < 0 || nextRow >= rows || nextColumn < 0 || nextColumn >= columns) continue;
-        const next = nextRow * columns + nextColumn;
-        if (visited[next] === 0 && source[next] === target) {
-          visited[next] = 1;
-          stack.push(next);
+      while (stack.length > 0) {
+        const index = stack.pop();
+        if (index === undefined) break;
+        region.push(index);
+        const row = Math.floor(index / columns);
+        const column = index % columns;
+        for (const [rowOffset, columnOffset] of neighborOffsets) {
+          const nextRow = row + rowOffset;
+          const nextColumn = column + columnOffset;
+          if (nextRow < 0 || nextRow >= rows || nextColumn < 0 || nextColumn >= columns) continue;
+          const next = nextRow * columns + nextColumn;
+          if (visited[next] === 0 && input[next] === target) {
+            visited[next] = 1;
+            stack.push(next);
+          }
         }
       }
-    }
-    if (region.length > threshold || lockedPaletteIndices.has(target)) continue;
+      if (region.length > threshold || lockedPaletteIndices.has(target)) continue;
 
-    const neighbors = new Map<number, number>();
-    for (const index of region) {
-      const row = Math.floor(index / columns);
-      const column = index % columns;
-      for (const [rowOffset, columnOffset] of neighborOffsets) {
-        const nextRow = row + rowOffset;
-        const nextColumn = column + columnOffset;
-        if (nextRow < 0 || nextRow >= rows || nextColumn < 0 || nextColumn >= columns) continue;
-        const neighbor = source[nextRow * columns + nextColumn];
-        if (neighbor === undefined || neighbor === EMPTY_CELL || neighbor === target) continue;
-        neighbors.set(neighbor, (neighbors.get(neighbor) ?? 0) + 1);
+      const neighbors = new Map<
+        number,
+        { boundary: number; sourceFit: number; sourceFitSamples: number; edgeContrast: number; edgeSamples: number }
+      >();
+      for (const index of region) {
+        const row = Math.floor(index / columns);
+        const column = index % columns;
+        const representative = representatives[index];
+        for (const [rowOffset, columnOffset] of neighborOffsets) {
+          const nextRow = row + rowOffset;
+          const nextColumn = column + columnOffset;
+          if (nextRow < 0 || nextRow >= rows || nextColumn < 0 || nextColumn >= columns) continue;
+          const neighborIndex = nextRow * columns + nextColumn;
+          const neighbor = input[neighborIndex];
+          if (neighbor === undefined || neighbor === EMPTY_CELL || neighbor === target) continue;
+          const stats = neighbors.get(neighbor) ?? {
+            boundary: 0,
+            sourceFit: 0,
+            sourceFitSamples: 0,
+            edgeContrast: 0,
+            edgeSamples: 0,
+          };
+          stats.boundary += 1;
+          const candidateLab = paletteLabs[neighbor];
+          if (representative && candidateLab) {
+            stats.sourceFit += deltaE2000(representative.lab, candidateLab);
+            stats.sourceFitSamples += 1;
+          }
+          const neighborRepresentative = representatives[neighborIndex];
+          if (representative && neighborRepresentative) {
+            stats.edgeContrast += deltaE2000(representative.lab, neighborRepresentative.lab);
+            stats.edgeSamples += 1;
+          }
+          neighbors.set(neighbor, stats);
+        }
       }
-    }
 
-    const sourceLab = paletteLabs[target];
-    let replacement = -1;
-    let bestBoundary = -1;
-    let bestDistance = Number.POSITIVE_INFINITY;
-    for (const [candidate, boundary] of neighbors) {
-      const candidateLab = paletteLabs[candidate];
-      const distance = sourceLab && candidateLab ? deltaE2000(sourceLab, candidateLab) : Number.POSITIVE_INFINITY;
-      if (
-        boundary > bestBoundary ||
-        (boundary === bestBoundary && distance < bestDistance - 1e-6) ||
-        (boundary === bestBoundary && Math.abs(distance - bestDistance) <= 1e-6 && candidate < replacement)
-      ) {
+      const targetLab = paletteLabs[target];
+      let replacement = -1;
+      let bestBoundary = -1;
+      let bestSourceFit = Number.POSITIVE_INFINITY;
+      let bestPaletteDistance = Number.POSITIVE_INFINITY;
+      let bestEdgeContrast = 0;
+      for (const [candidate, stats] of neighbors) {
+        const candidateLab = paletteLabs[candidate];
+        const paletteDistance = targetLab && candidateLab
+          ? deltaE2000(targetLab, candidateLab)
+          : Number.POSITIVE_INFINITY;
+        const sourceFit = stats.sourceFitSamples > 0
+          ? stats.sourceFit / stats.sourceFitSamples
+          : Number.POSITIVE_INFINITY;
+        const better =
+          stats.boundary > bestBoundary ||
+          (stats.boundary === bestBoundary && sourceFit < bestSourceFit - 1e-6) ||
+          (stats.boundary === bestBoundary && Math.abs(sourceFit - bestSourceFit) <= 1e-6 && paletteDistance < bestPaletteDistance - 1e-6) ||
+          (stats.boundary === bestBoundary && Math.abs(sourceFit - bestSourceFit) <= 1e-6 && Math.abs(paletteDistance - bestPaletteDistance) <= 1e-6 && candidate < replacement);
+        if (!better) continue;
         replacement = candidate;
-        bestBoundary = boundary;
-        bestDistance = distance;
+        bestBoundary = stats.boundary;
+        bestSourceFit = sourceFit;
+        bestPaletteDistance = paletteDistance;
+        bestEdgeContrast = stats.edgeSamples > 0 ? stats.edgeContrast / stats.edgeSamples : 0;
+      }
+
+      const isLowContrastIsland = bestPaletteDistance <= LOW_CONTRAST_CLEANUP_DELTA_E;
+      const hasSourceEdgeSupport = bestEdgeContrast >= edgeProtectionThreshold;
+      if (replacement >= 0 && isLowContrastIsland && !hasSourceEdgeSupport) {
+        region.forEach((index) => (nextOutput[index] = replacement));
+        changed = true;
       }
     }
-    if (replacement >= 0) region.forEach((index) => (output[index] = replacement));
+
+    output = nextOutput;
+    if (!changed) break;
   }
   return output;
 }
@@ -395,6 +522,7 @@ export function generatePattern(
     );
   }
   options.onProgress?.({ stage: 'sample', completed: cellCount, total: cellCount });
+  annotateEdgeStrength(representatives, settings.grid);
 
   const { buckets, bucketIndexByKey } = buildHistogram(representatives);
   if (buckets.length === 0) {
@@ -406,11 +534,12 @@ export function generatePattern(
   options.onProgress?.({ stage: 'select', completed: 0, total: 2 });
   const { distances, paletteLabs } = buildDistanceMatrix(buckets, palette, enabledIndices, checkCancelled);
   options.onProgress?.({ stage: 'select', completed: 1, total: 2 });
-  const { selectedPaletteIndices, selectedEnabledIndices } = selectPaletteIndices(
+  const selectedEnabledIndices = selectPaletteIndices(
     buckets,
     palette,
     enabledIndices,
     distances,
+    paletteLabs,
     settings,
     checkCancelled,
   );
@@ -458,13 +587,21 @@ export function generatePattern(
   const cells = cleanupSmallRegions(
     mapped,
     settings.grid,
-    settings.detailPriority ? 0 : settings.cleanupRegionSize,
+    settings.cleanupRegionSize,
     paletteLabs,
     lockedPaletteIndices,
+    representatives,
+    settings.detailPriority,
   );
   options.onProgress?.({ stage: 'cleanup', completed: 1, total: 1 });
   const { counts, totalBeads } = countCells(cells, settings.grid, palette);
-  return { grid: settings.grid, cells, counts, totalBeads, selectedPaletteIndices };
+  return {
+    grid: settings.grid,
+    cells,
+    counts,
+    totalBeads,
+    selectedPaletteIndices: counts.map((entry) => entry.paletteIndex),
+  };
 }
 
 export const GENERATION_SAMPLE_SCALE = SAMPLE_SCALE;

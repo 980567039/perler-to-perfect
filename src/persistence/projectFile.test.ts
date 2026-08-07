@@ -7,6 +7,7 @@ describe('project file compatibility', () => {
   it('enables detail priority when importing a legacy project without the field', () => {
     const legacySettings = { ...createDefaultSettings(DEVELOPMENT_PALETTE) };
     Reflect.deleteProperty(legacySettings, 'detailPriority');
+    Reflect.deleteProperty(legacySettings, 'minimumPaletteDistance');
     const project = {
       schemaVersion: 1,
       id: 'legacy-project',
@@ -21,6 +22,7 @@ describe('project file compatibility', () => {
     };
 
     expect(parseProject(JSON.stringify(project)).settings.detailPriority).toBe(true);
+    expect(parseProject(JSON.stringify(project)).settings.minimumPaletteDistance).toBe(4);
     expect(parseProject(JSON.stringify(project)).watermarkEnabled).toBe(true);
   });
 

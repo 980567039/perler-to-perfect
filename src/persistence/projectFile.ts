@@ -25,6 +25,7 @@ const settingsSchema = z.object({
     })
     .optional(),
   maxUsedColors: z.number().int().min(2).max(64),
+  minimumPaletteDistance: z.number().min(0).max(12).default(4),
   enabledColorIds: z.array(z.string()),
   lockedColorIds: z.array(z.string()),
   cleanupRegionSize: z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3), z.literal(4)]),

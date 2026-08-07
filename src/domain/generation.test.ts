@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { hexToRgb } from './color';
 import { generatePattern } from './generation';
-import type { PaletteManifest } from './types';
+import type { GenerationSettings, PaletteManifest } from './types';
 
 const twoColorPalette: PaletteManifest = {
   schemaVersion: 1,
@@ -11,6 +12,20 @@ const twoColorPalette: PaletteManifest = {
   source: { label: 'test fixture' },
   colors: [
     { id: 'test:white', code: 'W1', srgbHex: '#FFFFFF' },
+    { id: 'test:black', code: 'B1', srgbHex: '#000000' },
+  ],
+};
+
+const adaptivePalette: PaletteManifest = {
+  schemaVersion: 1,
+  id: 'test:adaptive',
+  brand: 'Test',
+  edition: 'Adaptive colors',
+  version: '1',
+  source: { label: 'test fixture' },
+  colors: [
+    { id: 'test:gray', code: 'G1', srgbHex: '#808080' },
+    { id: 'test:near-gray', code: 'G2', srgbHex: '#909090' },
     { id: 'test:black', code: 'B1', srgbHex: '#000000' },
   ],
 };
@@ -26,6 +41,47 @@ function solidSample(red: number, green: number, blue: number, alpha = 255): Ima
   return { data, width: 4, height: 4, colorSpace: 'srgb' } as ImageData;
 }
 
+function gridSample(columns: number, rows: number, colors: string[]): ImageData {
+  if (colors.length !== columns * rows) throw new Error('test grid color count mismatch');
+  const width = columns * 4;
+  const height = rows * 4;
+  const data = new Uint8ClampedArray(width * height * 4);
+  colors.forEach((hex, cellIndex) => {
+    const rgb = hexToRgb(hex);
+    const cellRow = Math.floor(cellIndex / columns);
+    const cellColumn = cellIndex % columns;
+    for (let y = 0; y < 4; y += 1) {
+      for (let x = 0; x < 4; x += 1) {
+        const offset = ((cellRow * 4 + y) * width + cellColumn * 4 + x) * 4;
+        data[offset] = rgb.r;
+        data[offset + 1] = rgb.g;
+        data[offset + 2] = rgb.b;
+        data[offset + 3] = 255;
+      }
+    }
+  });
+  return { data, width, height, colorSpace: 'srgb' } as ImageData;
+}
+
+function adaptiveSettings(
+  columns: number,
+  rows: number,
+  patch: Partial<GenerationSettings> = {},
+): GenerationSettings {
+  return {
+    grid: { columns, rows },
+    fit: 'contain',
+    transform: { scale: 1, offsetX: 0, offsetY: 0 },
+    maxUsedColors: 3,
+    minimumPaletteDistance: 0,
+    enabledColorIds: adaptivePalette.colors.map((color) => color.id),
+    lockedColorIds: [],
+    cleanupRegionSize: 0,
+    detailPriority: true,
+    ...patch,
+  };
+}
+
 describe('pattern generation', () => {
   it('maps one target cell to exactly one palette index', () => {
     const result = generatePattern(solidSample(8, 8, 8), twoColorPalette, {
@@ -33,6 +89,7 @@ describe('pattern generation', () => {
       fit: 'contain',
       transform: { scale: 1, offsetX: 0, offsetY: 0 },
       maxUsedColors: 2,
+      minimumPaletteDistance: 0,
       enabledColorIds: ['test:white', 'test:black'],
       lockedColorIds: [],
       cleanupRegionSize: 0,
@@ -48,6 +105,7 @@ describe('pattern generation', () => {
       fit: 'contain',
       transform: { scale: 1, offsetX: 0, offsetY: 0 },
       maxUsedColors: 2,
+      minimumPaletteDistance: 0,
       enabledColorIds: ['test:white', 'test:black'],
       lockedColorIds: [],
       cleanupRegionSize: 0,
@@ -73,6 +131,7 @@ describe('pattern generation', () => {
         fit: 'contain',
         transform: { scale: 1, offsetX: 0, offsetY: 0 },
         maxUsedColors: 2,
+        minimumPaletteDistance: 0,
         enabledColorIds: ['test:white', 'test:black'],
         lockedColorIds: [],
         cleanupRegionSize: 0,
@@ -102,6 +161,7 @@ describe('pattern generation', () => {
       fit: 'contain' as const,
       transform: { scale: 1, offsetX: 0, offsetY: 0 },
       maxUsedColors: 2,
+      minimumPaletteDistance: 0,
       enabledColorIds: ['test:white', 'test:black'],
       lockedColorIds: [],
       cleanupRegionSize: 0 as const,
@@ -109,5 +169,70 @@ describe('pattern generation', () => {
 
     expect(generatePattern(sampledImage, twoColorPalette, { ...baseSettings, detailPriority: false }).cells[0]).toBe(0);
     expect(generatePattern(sampledImage, twoColorPalette, { ...baseSettings, detailPriority: true }).cells[0]).toBe(1);
+  });
+
+  it('treats the color limit as a ceiling and suppresses a low-support nearby shade', () => {
+    const colors = Array<string>(100).fill('#808080');
+    colors.fill('#909090', 95);
+
+    const result = generatePattern(
+      gridSample(20, 5, colors),
+      adaptivePalette,
+      adaptiveSettings(20, 5, { minimumPaletteDistance: 8, detailPriority: false }),
+    );
+
+    expect(result.counts).toEqual([
+      expect.objectContaining({ colorId: 'test:gray', count: 100 }),
+    ]);
+    expect(result.selectedPaletteIndices).toEqual([0]);
+  });
+
+  it('keeps a nearby shade when it covers a substantial region', () => {
+    const colors = Array<string>(100).fill('#808080');
+    colors.fill('#909090', 50);
+
+    const result = generatePattern(
+      gridSample(20, 5, colors),
+      adaptivePalette,
+      adaptiveSettings(20, 5, { minimumPaletteDistance: 8, detailPriority: false }),
+    );
+
+    expect(result.counts.map(({ paletteIndex, count }) => [paletteIndex, count])).toEqual([
+      [0, 50],
+      [1, 50],
+    ]);
+  });
+
+  it('cleans a low-contrast island even when detail priority is enabled', () => {
+    const colors = Array<string>(9).fill('#808080');
+    colors[4] = '#909090';
+
+    const result = generatePattern(
+      gridSample(3, 3, colors),
+      adaptivePalette,
+      adaptiveSettings(3, 3, { cleanupRegionSize: 1, detailPriority: true }),
+    );
+
+    expect([...result.cells]).toEqual(Array<number>(9).fill(0));
+    expect(result.counts).toEqual([
+      expect.objectContaining({ colorId: 'test:gray', count: 9 }),
+    ]);
+  });
+
+  it('preserves a high-contrast structural detail during small-region cleanup', () => {
+    const colors = Array<string>(9).fill('#808080');
+    colors[4] = '#000000';
+
+    const result = generatePattern(
+      gridSample(3, 3, colors),
+      adaptivePalette,
+      adaptiveSettings(3, 3, { cleanupRegionSize: 1, detailPriority: true }),
+    );
+
+    expect(result.cells[4]).toBe(2);
+    expect(result.counts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ colorId: 'test:gray', count: 8 }),
+      expect.objectContaining({ colorId: 'test:black', count: 1 }),
+    ]));
   });
 });

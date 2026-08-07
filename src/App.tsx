@@ -216,8 +216,9 @@ export function App() {
     updateSetting({
       grid: { columns: settings.columns, rows: settings.rows },
       maxUsedColors: settings.maxUsedColors,
+      minimumPaletteDistance: 4,
       detailPriority: true,
-      cleanupRegionSize: 0,
+      cleanupRegionSize: 2,
     });
   };
 
@@ -495,11 +496,11 @@ export function App() {
               />
               <span>
                 <strong>细节优先</strong>
-                <small>保护轮廓和高对比小区域，不合并 1–2 格细节</small>
+                <small>加强轮廓和高对比细节；低对比杂点仍会清理</small>
               </span>
             </label>
             <label className="field-stack">
-              实际用色上限：{store.settings.maxUsedColors}
+              实际用色上限：{store.settings.maxUsedColors}（有收益才增加）
               <input
                 type="range"
                 min="2"
@@ -509,18 +510,31 @@ export function App() {
               />
             </label>
             <label className="field-stack">
-              {store.settings.detailPriority ? '杂色清理：细节优先时关闭' : `杂色清理：≤ ${store.settings.cleanupRegionSize} 格`}
+              {store.settings.minimumPaletteDistance === 0
+                ? '相近色合并：关闭'
+                : `相近色合并：ΔE < ${store.settings.minimumPaletteDistance}`}
+              <input
+                type="range"
+                min="0"
+                max="12"
+                step="1"
+                value={store.settings.minimumPaletteDistance}
+                onChange={(event) => updateSetting({ minimumPaletteDistance: Number(event.target.value) })}
+              />
+            </label>
+            <label className="field-stack">
+              低对比杂色清理：≤ {store.settings.cleanupRegionSize} 格
               <input
                 type="range"
                 min="0"
                 max="4"
                 value={store.settings.cleanupRegionSize}
-                disabled={store.settings.detailPriority}
                 onChange={(event) =>
                   updateSetting({ cleanupRegionSize: Number(event.target.value) as 0 | 1 | 2 | 3 | 4 })
                 }
               />
             </label>
+            <p className="helper">用色数是上限，不会强制用满；相近色若覆盖足够大的真实区域仍可保留。</p>
             <label className="secondary-button file-button">
               导入自定义色板
               <input

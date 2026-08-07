@@ -3,7 +3,7 @@ export const MAX_GRID_SIDE = 300;
 export const MAX_SOURCE_BYTES = 25 * 1024 * 1024;
 export const MAX_SOURCE_PIXELS = 40_000_000;
 export const PROJECT_SCHEMA_VERSION = 1 as const;
-export const ALGORITHM_VERSION = '0.2.0';
+export const ALGORITHM_VERSION = '0.3.0';
 
 export interface GridSize {
   columns: number;
@@ -75,6 +75,8 @@ export interface GenerationSettings {
   /** Optional crop box in normalized preview/grid coordinates. */
   cropBox?: CropBox;
   maxUsedColors: number;
+  /** Minimum CIEDE2000 distance between automatically selected palette colors. */
+  minimumPaletteDistance: number;
   enabledColorIds: string[];
   lockedColorIds: string[];
   cleanupRegionSize: 0 | 1 | 2 | 3 | 4;
@@ -163,6 +165,7 @@ export function createDefaultSettings(palette: PaletteManifest): GenerationSetti
     fit: 'crop',
     transform: { scale: 1, offsetX: 0, offsetY: 0 },
     maxUsedColors: 16,
+    minimumPaletteDistance: 4,
     enabledColorIds: palette.colors.map((color) => color.id),
     lockedColorIds: [],
     cleanupRegionSize: 2,

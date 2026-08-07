@@ -25,8 +25,9 @@ export function createAutoGenerationSettings(settings: AutoGenerationSettings): 
     transform: { scale: 1, offsetX: 0, offsetY: 0 },
     cropBox: undefined,
     maxUsedColors: settings.maxUsedColors,
+    minimumPaletteDistance: 4,
     detailPriority: true,
-    cleanupRegionSize: 0,
+    cleanupRegionSize: 2,
   };
 }
 

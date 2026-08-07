@@ -8,5 +8,6 @@ describe('default generation settings', () => {
 
     expect(settings.grid).toEqual({ columns: 104, rows: 104 });
     expect(settings.detailPriority).toBe(true);
+    expect(settings.minimumPaletteDistance).toBe(4);
   });
 });

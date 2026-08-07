@@ -40,7 +40,8 @@ describe('automatic pattern pipeline helpers', () => {
       fit: 'crop',
       transform: { scale: 1, offsetX: 0, offsetY: 0 },
       maxUsedColors: 32,
-      cleanupRegionSize: 0,
+      minimumPaletteDistance: 4,
+      cleanupRegionSize: 2,
       detailPriority: true,
     }));
     expect(settings.enabledColorIds).toHaveLength(221);
