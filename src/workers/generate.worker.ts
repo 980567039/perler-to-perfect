@@ -1,6 +1,7 @@
 /// <reference lib="webworker" />
 
 import { GENERATION_SAMPLE_SCALE, GenerationCancelledError, generatePattern } from '../domain/generation';
+import { fitWithinFrame } from '../domain/framing';
 import type { GenerateRequest, GenerateResponse, GenerationSettings } from '../domain/types';
 
 const workerScope: DedicatedWorkerGlobalScope = self as unknown as DedicatedWorkerGlobalScope;
@@ -48,7 +49,10 @@ function drawSampledImage(bitmap: ImageBitmap, settings: GenerationSettings): Im
     const ey = clamp(sourceY + sourceHeight, 0, bitmap.height);
     const sw = Math.max(1, ex - sx);
     const sh = Math.max(1, ey - sy);
-    context.drawImage(bitmap, sx, sy, sw, sh, 0, 0, width, height);
+    // A free-form crop is allowed, but it must not be stretched to match the
+    // grid. For example, a 3:4 crop remains 3:4 inside a square bead board.
+    const target = fitWithinFrame(sw, sh, width, height);
+    context.drawImage(bitmap, sx, sy, sw, sh, target.left, target.top, target.width, target.height);
   } else {
     const baseScale =
       settings.fit === 'contain'

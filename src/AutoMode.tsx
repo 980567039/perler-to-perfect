@@ -1,7 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { MARD_STANDARD_221_PALETTE } from './domain/mardPalette';
-import { createAutoGenerationSettings, decodeAutoSource, removeAutoBorderBackground } from './integrations/autoPattern';
+import {
+  createAutoGenerationSettings,
+  decodeAutoSource,
+  refineAutoPattern,
+  removeAutoBorderBackground,
+} from './integrations/autoPattern';
 import { RedinkAutoBridge, type RedinkAutoGeneratePayload } from './integrations/redinkAutoBridge';
+import { renderAutoPatternPreview } from './rendering/autoPatternPreview';
 import { exportMasterPattern } from './workers/export.client';
 import { startGeneration, type GenerationTask } from './workers/generate.client';
 
@@ -41,22 +47,33 @@ export function AutoMode() {
         generationTask.current = null;
 
         bridge.sendProgress('background', 0, 1);
-        const result = removeAutoBorderBackground(generated);
+        const backgroundRemoved = removeAutoBorderBackground(generated);
         bridge.sendProgress('background', 1, 1);
+
+        setStatus('正在精细化图纸…');
+        bridge.sendProgress('refine', 0, 1);
+        const result = refineAutoPattern(backgroundRemoved, payload.settings.maxUsedColors);
+        bridge.sendProgress('refine', 1, 1);
         if (result.counts.length === 0) {
           throw new Error('背景移除后没有可用拼豆格，请进入 Perler 工作台手动调整。');
         }
 
-        setStatus('正在渲染母版…');
-        bridge.sendProgress('render', 0, 1);
+        setStatus('正在渲染效果图和母版…');
+        bridge.sendProgress('render', 0, 2);
+        const preview = await renderAutoPatternPreview({
+          grid: result.grid,
+          cells: result.cells,
+          palette: MARD_STANDARD_221_PALETTE,
+        });
+        bridge.sendProgress('render', 1, 2);
         const master = await exportMasterPattern({
           grid: result.grid,
           cells: result.cells,
           palette: MARD_STANDARD_221_PALETTE,
           watermarkEnabled: true,
         });
-        bridge.sendProgress('render', 1, 1);
-        await bridge.sendPattern(master, {
+        bridge.sendProgress('render', 2, 2);
+        await bridge.sendPattern(master, preview, {
           columns: result.grid.columns,
           rows: result.grid.rows,
           usedColors: result.counts.length,

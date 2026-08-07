@@ -4,6 +4,7 @@ import type { PatternMetadata, RedinkImageContext } from './redinkBridge';
 const CHANNEL = 'redink-perler-auto';
 const VERSION = 1 as const;
 const MAX_PATTERN_BYTES = 20 * 1024 * 1024;
+const MAX_PREVIEW_BYTES = 10 * 1024 * 1024;
 const ALLOWED_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
 const REQUEST_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
 
@@ -14,6 +15,7 @@ export type AutoProgressStage =
   | 'map'
   | 'cleanup'
   | 'background'
+  | 'refine'
   | 'render';
 
 export interface AutoGenerationSettings {
@@ -135,17 +137,24 @@ export class RedinkAutoBridge {
     this.post({ type: 'AUTO_PROGRESS', stage, completed, total });
   }
 
-  async sendPattern(master: Blob, metadata: PatternMetadata): Promise<void> {
-    if (master.type !== 'image/png' || master.size === 0 || master.size > MAX_PATTERN_BYTES) {
-      throw new Error('图纸母版必须是 20MB 以内的 PNG。');
-    }
+  async sendPattern(master: Blob, preview: Blob, metadata: PatternMetadata): Promise<void> {
+    this.validatePng(master, '图纸母版', MAX_PATTERN_BYTES);
+    this.validatePng(preview, '效果预览', MAX_PREVIEW_BYTES);
     if (!isValidMetadata(metadata)) throw new Error('图纸元数据无效。');
-    const pattern = typeof master.arrayBuffer === 'function'
-      ? await master.arrayBuffer()
-      : await new Response(master).arrayBuffer();
+    const [pattern, previewBuffer] = await Promise.all([
+      this.blobToArrayBuffer(master),
+      this.blobToArrayBuffer(preview),
+    ]);
     this.post(
-      { type: 'AUTO_PATTERN_READY', pattern, mimeType: 'image/png', metadata },
-      [pattern],
+      {
+        type: 'AUTO_PATTERN_READY',
+        pattern,
+        mimeType: 'image/png',
+        preview: previewBuffer,
+        previewMimeType: 'image/png',
+        metadata,
+      },
+      [pattern, previewBuffer],
     );
   }
 
@@ -202,6 +211,18 @@ export class RedinkAutoBridge {
       transfer,
     );
   }
+
+  private validatePng(image: Blob, label: string, maxBytes: number): void {
+    if (!(image instanceof Blob) || image.type !== 'image/png' || image.size === 0 || image.size > maxBytes) {
+      throw new Error(`${label}必须是 ${maxBytes / 1024 / 1024}MB 以内的 PNG。`);
+    }
+  }
+
+  private async blobToArrayBuffer(image: Blob): Promise<ArrayBuffer> {
+    return typeof image.arrayBuffer === 'function'
+      ? image.arrayBuffer()
+      : new Response(image).arrayBuffer();
+  }
 }
 
 export function isRedinkAutoMode(search = window.location.search): boolean {
@@ -211,6 +232,7 @@ export function isRedinkAutoMode(search = window.location.search): boolean {
 export const redinkAutoBridgeLimits = {
   maxBytes: MAX_SOURCE_BYTES,
   maxPatternBytes: MAX_PATTERN_BYTES,
+  maxPreviewBytes: MAX_PREVIEW_BYTES,
   maxSourcePixels: MAX_SOURCE_PIXELS,
   allowedImageTypes: [...ALLOWED_IMAGE_TYPES],
 };

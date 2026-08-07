@@ -102,21 +102,25 @@ describe('RedInk automatic bridge', () => {
     );
   });
 
-  it('sends protocol progress and a PNG master with transfer ownership', async () => {
+  it('sends protocol progress plus PNG master and preview with transfer ownership', async () => {
     const parent = { postMessage: vi.fn() };
     Object.defineProperty(window, 'parent', { value: parent, configurable: true });
     window.history.replaceState({}, '', '/?mode=auto&handoff=auto-1');
     bridge = new RedinkAutoBridge(() => undefined);
 
-    bridge.sendProgress('render', 1, 1);
-    await bridge.sendPattern(new Blob(['png'], { type: 'image/png' }), {
+    bridge.sendProgress('refine', 1, 1);
+    await bridge.sendPattern(
+      new Blob(['master'], { type: 'image/png' }),
+      new Blob(['preview'], { type: 'image/png' }),
+      {
       columns: 104,
       rows: 104,
       usedColors: 12,
-    });
+      },
+    );
 
     expect(parent.postMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'AUTO_PROGRESS', stage: 'render', completed: 1, total: 1 }),
+      expect.objectContaining({ type: 'AUTO_PROGRESS', stage: 'refine', completed: 1, total: 1 }),
       redinkOrigin,
       [],
     );
@@ -125,10 +129,39 @@ describe('RedInk automatic bridge', () => {
         type: 'AUTO_PATTERN_READY',
         requestId: 'auto-1',
         mimeType: 'image/png',
+        previewMimeType: 'image/png',
+        pattern: expect.any(ArrayBuffer),
+        preview: expect.any(ArrayBuffer),
         metadata: { columns: 104, rows: 104, usedColors: 12 },
       }),
       redinkOrigin,
-      expect.arrayContaining([expect.any(ArrayBuffer)]),
+      [expect.any(ArrayBuffer), expect.any(ArrayBuffer)],
+    );
+  });
+
+  it('validates the master and preview PNG independently before posting', async () => {
+    const parent = { postMessage: vi.fn() };
+    Object.defineProperty(window, 'parent', { value: parent, configurable: true });
+    window.history.replaceState({}, '', '/?mode=auto&handoff=auto-1');
+    bridge = new RedinkAutoBridge(() => undefined);
+    const metadata = { columns: 104, rows: 104, usedColors: 12 };
+    const png = new Blob(['png'], { type: 'image/png' });
+
+    await expect(bridge.sendPattern(
+      new Blob(['jpeg'], { type: 'image/jpeg' }),
+      png,
+      metadata,
+    )).rejects.toThrow('图纸母版');
+    await expect(bridge.sendPattern(
+      png,
+      new Blob([], { type: 'image/png' }),
+      metadata,
+    )).rejects.toThrow('效果预览');
+
+    expect(parent.postMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'AUTO_PATTERN_READY' }),
+      redinkOrigin,
+      expect.any(Array),
     );
   });
 });
