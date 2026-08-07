@@ -209,10 +209,13 @@ export function App() {
     await handleImageFile(payload.image);
     setHandoffContext(payload.context);
     autoGenerateAfterImport.current = true;
-    setNotice('已从 RedInk 接收拼豆源图，正在按 104×104、40 色、细节优先生成。');
+    const settings = payload.settings ?? { columns: 104, rows: 104, maxUsedColors: 40 };
+    setNotice(
+      `已从 RedInk 接收拼豆源图，正在按 ${settings.columns}×${settings.rows}、${settings.maxUsedColors} 色、细节优先生成。`,
+    );
     updateSetting({
-      grid: { columns: 104, rows: 104 },
-      maxUsedColors: 40,
+      grid: { columns: settings.columns, rows: settings.rows },
+      maxUsedColors: settings.maxUsedColors,
       detailPriority: true,
       cleanupRegionSize: 0,
     });

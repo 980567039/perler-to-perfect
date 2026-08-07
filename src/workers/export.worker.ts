@@ -2,7 +2,7 @@
 
 import { zipSync } from 'fflate';
 import { drawPatternGrid, gridCanvasDimensions } from '../rendering/patternDrawing';
-import type { ExportRequest, ExportResponse } from './export.types';
+import type { ExportRequest, ExportResponse, PatternExportRequest } from './export.types';
 
 const workerScope: DedicatedWorkerGlobalScope = self as unknown as DedicatedWorkerGlobalScope;
 const MAX_MASTER_PIXELS = 64_000_000;
@@ -26,7 +26,7 @@ function chooseMasterCellPixels(columns: number, rows: number): number {
 
 async function renderGrid(
   cells: Uint16Array,
-  request: ExportRequest,
+  request: Pick<PatternExportRequest, 'grid' | 'palette' | 'watermarkEnabled'>,
   startRow: number,
   startColumn: number,
   rows: number,
@@ -96,17 +96,15 @@ async function renderLegend(request: ExportRequest): Promise<Uint8Array> {
   return canvasToBytes(canvas);
 }
 
-workerScope.onmessage = async (event: MessageEvent<ExportRequest>) => {
+workerScope.onmessage = async (event: MessageEvent<PatternExportRequest>) => {
   const request = event.data;
-  if (request.type !== 'EXPORT') return;
+  if (request.type !== 'EXPORT' && request.type !== 'EXPORT_MASTER') return;
   try {
     const cells = new Uint16Array(request.cells);
-    const tileRows = Math.ceil(request.grid.rows / request.tileSize);
-    const tileColumns = Math.ceil(request.grid.columns / request.tileSize);
-    const totalSteps = tileRows * tileColumns + 2;
-    let completed = 0;
-    post({ type: 'PROGRESS', jobId: request.jobId, completed, total: totalSteps, stage: '母版' });
-
+    const tileRows = request.type === 'EXPORT' ? Math.ceil(request.grid.rows / request.tileSize) : 0;
+    const tileColumns = request.type === 'EXPORT' ? Math.ceil(request.grid.columns / request.tileSize) : 0;
+    const totalSteps = request.type === 'EXPORT' ? tileRows * tileColumns + 2 : 1;
+    post({ type: 'PROGRESS', jobId: request.jobId, completed: 0, total: totalSteps, stage: '母版' });
     const masterCellPixels = chooseMasterCellPixels(request.grid.columns, request.grid.rows);
     const master = await renderGrid(
       cells,
@@ -117,6 +115,15 @@ workerScope.onmessage = async (event: MessageEvent<ExportRequest>) => {
       request.grid.columns,
       masterCellPixels,
     );
+
+    if (request.type === 'EXPORT_MASTER') {
+      const masterBuffer = master.buffer.slice(master.byteOffset, master.byteOffset + master.byteLength) as ArrayBuffer;
+      post({ type: 'PROGRESS', jobId: request.jobId, completed: 1, total: 1, stage: '母版' });
+      post({ type: 'MASTER_RESULT', jobId: request.jobId, master: masterBuffer }, [masterBuffer]);
+      return;
+    }
+
+    let completed = 0;
     completed += 1;
     post({ type: 'PROGRESS', jobId: request.jobId, completed, total: totalSteps, stage: '图例' });
     const legend = await renderLegend(request);

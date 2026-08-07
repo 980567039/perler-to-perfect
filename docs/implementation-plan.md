@@ -286,17 +286,17 @@ ZIP 内容固定为：
 
 ### 9.1 范围与用户流程
 
-联动只针对系列合集的单张角色图片。RedInk 在图片操作区提供“生成拼豆图纸”按钮；点击后同步打开携带 `requestId` 的受信任 Perler 页面，等待该窗口返回就绪消息，再把原图二进制交给 Perler。这样不会受跨域图片 URL、Cookie 或画布污染影响，也能避开浏览器对异步弹窗的拦截。
+联动只针对系列合集的单张角色图片。RedInk 在图片操作区提供“生成拼豆图纸”按钮；默认流程先填写行数、列数和最大用色数，再通过离屏 iframe 打开携带 `requestId` 的 Perler 自动入口。自动入口返回就绪消息后，RedInk 把原图二进制交给 Perler，并在本页展示生成进度和母版预览，不需要用户切换窗口。预览页仍保留“进入 Perler 精修”，该操作才会打开原有完整工作台。
 
 RedInk 生成阶段新增“拼豆源图”约束：单主体、主体占画面主要区域、无文字/标题/水印/边框/拼贴、轮廓清晰、有限色、大色块和干净背景。它是供转换使用的源图，不替代正常发布图；用户仍可在 Perler 中裁切、清理背景、保留主体和手动精修。
 
-Perler 收到源图后使用 `104×104`、最多 40 色、细节优先作为联动初值，但允许用户在本工具内调整。完成后只回传母版 PNG；图例、分块 ZIP 与可编辑工程仍由 Perler 本地下载。
+自动入口收到源图后使用 RedInk 传入的网格与用色上限，首次默认 `104×104`、最多 40 色，并固定启用细节优先。生成后仅清除一次与边缘连通的主背景色，只渲染并回传母版 PNG，不读写工作台自动保存，也不生成图例、分块 ZIP 或本地下载。进入完整工作台精修后，原有编辑、工程保存和 PNG/ZIP 导出行为保持不变。
 
 回传后 RedInk 必须显示确认弹窗：“将这张拼豆图纸追加到该子主题的最后一张图片吗？”只有点击确认才持久化。取消、关闭弹窗、Perler 页面关闭、超时或回传校验失败都不能改动历史记录或发布序列。
 
 ### 9.2 浏览器交接与线上配置
 
-本地默认 origin 为 RedInk `http://localhost:5173`、Perler `http://localhost:5174`。线上部署分别通过 `VITE_PERLER_ORIGIN` 和 Perler 的允许 RedInk origin 配置注入实际 HTTPS origin；每次 `postMessage` 都使用精确 `targetOrigin`，接收端也严格比较 `event.origin`，禁止使用 `*`。
+本地默认 origin 为 RedInk `http://localhost:5173`、Perler `http://localhost:5174`。线上部署分别通过 `VITE_PERLER_ORIGIN` 和 Perler 的允许 RedInk origin 配置注入实际 HTTPS origin；Perler 的响应头还必须通过 CSP `frame-ancestors` 精确允许 RedInk origin。每次 `postMessage` 都使用精确 `targetOrigin`，接收端也严格比较 `event.origin`，禁止使用 `*`。
 
 消息使用版本化、可判别的协议。`requestId` 由 RedInk 生成并贯穿整次会话，消息中不携带 API Key、Cookie、完整历史记录或可猜测的本地文件路径：
 
@@ -314,6 +314,8 @@ type PerlerHandoffMessage =
       metadata: { columns: number; rows: number; usedColors: number };
     };
 ```
+
+自动入口使用独立的 `redink-perler-auto`、版本 `1` 协议，消息依次为 `AUTO_READY`、`AUTO_GENERATE`、`AUTO_PROGRESS`、`AUTO_PATTERN_READY` 或 `AUTO_ERROR`。`AUTO_GENERATE` 除原图和来源上下文外，还携带 `columns`、`rows`、`maxUsedColors` 与固定为 `true` 的 `removeBorderBackground`；原有 `redink-perler` 手动协议保持兼容，只为 `IMPORT_IMAGE` 增加可选规格字段。
 
 二进制通过 transferable `ArrayBuffer` 传递，避免 Data URL 额外复制。Perler 仅接受来自允许 RedInk origin、与当前窗口会话匹配且 `requestId` 有效的消息；RedInk 仅接受来自配置 Perler origin、`event.source` 等于其刚打开窗口且 `requestId` 匹配的回传。双方限制 MIME、字节大小、解码像素和超时，并在窗口关闭时清理监听器和待处理请求。交接无需让 Perler 跨域下载 RedInk 的图片，也不需要开放图片目录。
 

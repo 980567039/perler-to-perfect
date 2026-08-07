@@ -75,4 +75,59 @@ describe('RedInk bridge', () => {
 
     expect(bridge.connected).toBe(true);
   });
+
+  it('accepts optional RedInk grid settings without changing legacy payloads', async () => {
+    const parent = { postMessage: vi.fn() };
+    Object.defineProperty(window, 'opener', { value: parent, configurable: true });
+    window.history.replaceState({}, '', '/?handoff=req-settings');
+    const onImport = vi.fn();
+    bridge = new RedinkBridge(onImport);
+
+    window.dispatchEvent(new MessageEvent('message', {
+      source: parent as unknown as Window,
+      origin: redinkOrigin,
+      data: {
+        channel: 'redink-perler',
+        version: 1,
+        type: 'IMPORT_IMAGE',
+        requestId: 'req-settings',
+        context: { recordId: 'record-1', imageIndex: 2, fileName: 'source.png' },
+        image: new Uint8Array([1]).buffer,
+        mimeType: 'image/png',
+        settings: { columns: 80, rows: 120, maxUsedColors: 32 },
+      },
+    }));
+
+    await vi.waitFor(() => expect(onImport).toHaveBeenCalledTimes(1));
+    expect(onImport.mock.calls[0]?.[0].settings).toEqual({ columns: 80, rows: 120, maxUsedColors: 32 });
+  });
+
+  it('rejects invalid optional manual settings', () => {
+    const parent = { postMessage: vi.fn() };
+    Object.defineProperty(window, 'opener', { value: parent, configurable: true });
+    window.history.replaceState({}, '', '/?handoff=req-invalid-settings');
+    const onImport = vi.fn();
+    bridge = new RedinkBridge(onImport);
+
+    window.dispatchEvent(new MessageEvent('message', {
+      source: parent as unknown as Window,
+      origin: redinkOrigin,
+      data: {
+        channel: 'redink-perler',
+        version: 1,
+        type: 'IMPORT_IMAGE',
+        requestId: 'req-invalid-settings',
+        context: { recordId: 'record-1', imageIndex: 0, fileName: 'source.png' },
+        image: new Uint8Array([1]).buffer,
+        mimeType: 'image/png',
+        settings: { columns: 0, rows: 104, maxUsedColors: 40 },
+      },
+    }));
+
+    expect(onImport).not.toHaveBeenCalled();
+    expect(parent.postMessage).toHaveBeenLastCalledWith(
+      expect.objectContaining({ type: 'PERLER_ERROR', requestId: 'req-invalid-settings' }),
+      redinkOrigin,
+    );
+  });
 });

@@ -10,10 +10,17 @@ export interface RedinkImageContext {
   fileName: string;
 }
 
+export interface RedinkGenerationSettings {
+  columns: number;
+  rows: number;
+  maxUsedColors: number;
+}
+
 export interface RedinkImportPayload {
   requestId: string;
   context: RedinkImageContext;
   image: File;
+  settings?: RedinkGenerationSettings;
 }
 
 export interface PatternMetadata {
@@ -32,6 +39,7 @@ interface BridgeMessage {
   mimeType?: string;
   pattern?: ArrayBuffer;
   metadata?: PatternMetadata;
+  settings?: RedinkGenerationSettings;
 }
 
 function configuredRedinkOrigin(): string | null {
@@ -69,6 +77,16 @@ function isValidMetadata(value: unknown): value is PatternMetadata {
     Number.isInteger(metadata.columns) && metadata.columns! >= 1 && metadata.columns! <= 300 &&
     Number.isInteger(metadata.rows) && metadata.rows! >= 1 && metadata.rows! <= 300 &&
     Number.isInteger(metadata.usedColors) && metadata.usedColors! >= 1 && metadata.usedColors! <= 64
+  );
+}
+
+function isValidGenerationSettings(value: unknown): value is RedinkGenerationSettings {
+  if (!value || typeof value !== 'object') return false;
+  const settings = value as Partial<RedinkGenerationSettings>;
+  return (
+    Number.isInteger(settings.columns) && settings.columns! >= 1 && settings.columns! <= 300 &&
+    Number.isInteger(settings.rows) && settings.rows! >= 1 && settings.rows! <= 300 &&
+    Number.isInteger(settings.maxUsedColors) && settings.maxUsedColors! >= 2 && settings.maxUsedColors! <= 64
   );
 }
 
@@ -150,9 +168,18 @@ export class RedinkBridge {
       this.sendError('图片类型或交接上下文无效。');
       return;
     }
+    if (message.settings !== undefined && !isValidGenerationSettings(message.settings)) {
+      this.sendError('图纸规格无效；行列必须为 1–300，最大用色数必须为 2–64。');
+      return;
+    }
     const fileName = message.context.fileName.replace(/[\\/:*?"<>|]+/g, '-').slice(0, 120) || 'redink-source.png';
     const file = new File([message.image], fileName, { type: message.mimeType });
-    void Promise.resolve(this.onImport({ requestId: this.requestId!, context: message.context, image: file })).catch((error: unknown) => {
+    void Promise.resolve(this.onImport({
+      requestId: this.requestId!,
+      context: message.context,
+      image: file,
+      settings: message.settings,
+    })).catch((error: unknown) => {
       this.sendError(error instanceof Error ? error.message : '导入图片失败。');
     });
   };
