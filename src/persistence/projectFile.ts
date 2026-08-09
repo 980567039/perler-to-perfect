@@ -30,6 +30,9 @@ const settingsSchema = z.object({
   lockedColorIds: z.array(z.string()),
   cleanupRegionSize: z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3), z.literal(4)]),
   detailPriority: z.boolean().default(true),
+  sourceMode: z.enum(['original', 'bead-source']).optional().default('original'),
+  renderProfile: z.enum(['shape', 'balanced', 'detail']).optional().default('balanced'),
+  structureStrength: z.number().min(0).max(1).optional().default(0.6),
 });
 
 const sourceSchema = z.object({

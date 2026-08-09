@@ -3,7 +3,7 @@ export const MAX_GRID_SIDE = 300;
 export const MAX_SOURCE_BYTES = 25 * 1024 * 1024;
 export const MAX_SOURCE_PIXELS = 40_000_000;
 export const PROJECT_SCHEMA_VERSION = 1 as const;
-export const ALGORITHM_VERSION = '0.3.0';
+export const ALGORITHM_VERSION = '0.4.0';
 
 export interface GridSize {
   columns: number;
@@ -81,6 +81,29 @@ export interface GenerationSettings {
   lockedColorIds: string[];
   cleanupRegionSize: 0 | 1 | 2 | 3 | 4;
   detailPriority: boolean;
+  /** Source generated specifically for gridding, or a general raster image. */
+  sourceMode?: 'original' | 'bead-source';
+  /** The product-facing trade-off, replacing opaque cleanup-only tuning. */
+  renderProfile?: 'shape' | 'balanced' | 'detail';
+  /** 0–1 region-consistency strength. Omitted values preserve V1 projects. */
+  structureStrength?: number;
+}
+
+export type CellReason = 'flat' | 'edge' | 'detail' | 'noise';
+
+export interface PatternDiagnostics {
+  /** 0–255: larger values mean the palette decision is less ambiguous. */
+  confidence: Uint8Array;
+  reasons: CellReason[];
+  structureScore: number;
+  noiseScore: number;
+}
+
+export interface PatternDiagnosticsPayload {
+  confidence: ArrayBuffer;
+  reasons: CellReason[];
+  structureScore: number;
+  noiseScore: number;
 }
 
 export interface ColorCount {
@@ -95,6 +118,7 @@ export interface PatternResult {
   counts: ColorCount[];
   totalBeads: number;
   selectedPaletteIndices: number[];
+  diagnostics?: PatternDiagnostics;
 }
 
 export interface SourceMetadata {
@@ -149,6 +173,7 @@ export type GenerateResponse =
       counts: ColorCount[];
       totalBeads: number;
       selectedPaletteIndices: number[];
+      diagnostics?: PatternDiagnosticsPayload;
     }
   | {
       type: 'ERROR';
@@ -170,5 +195,8 @@ export function createDefaultSettings(palette: PaletteManifest): GenerationSetti
     lockedColorIds: [],
     cleanupRegionSize: 2,
     detailPriority: true,
+    sourceMode: 'original',
+    renderProfile: 'balanced',
+    structureStrength: 0.6,
   };
 }

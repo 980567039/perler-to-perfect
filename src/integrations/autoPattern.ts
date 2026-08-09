@@ -18,6 +18,14 @@ const paletteLabs = MARD_STANDARD_221_PALETTE.colors.map(
 );
 
 export function createAutoGenerationSettings(settings: AutoGenerationSettings): GenerationSettings {
+  // V1 callers did not send a profile and historically used a conservative
+  // detail-preserving cleanup of two cells.
+  const renderProfile = settings.profile ?? 'balanced';
+  const profileSettings = {
+    shape: { detailPriority: false, structureStrength: 0.86, cleanupRegionSize: 2 as const },
+    balanced: { detailPriority: true, structureStrength: 0.6, cleanupRegionSize: 2 as const },
+    detail: { detailPriority: true, structureStrength: 0.22, cleanupRegionSize: 1 as const },
+  }[renderProfile];
   return {
     ...createDefaultSettings(MARD_STANDARD_221_PALETTE),
     grid: { columns: settings.columns, rows: settings.rows },
@@ -26,8 +34,9 @@ export function createAutoGenerationSettings(settings: AutoGenerationSettings): 
     cropBox: undefined,
     maxUsedColors: settings.maxUsedColors,
     minimumPaletteDistance: 4,
-    detailPriority: true,
-    cleanupRegionSize: 2,
+    ...profileSettings,
+    sourceMode: settings.sourceKind ?? 'original',
+    renderProfile,
   };
 }
 
@@ -59,13 +68,19 @@ export function removeAutoBorderBackground(result: PatternResult): PatternResult
  * automatic 104 × 104 pipeline. Other grid sizes are copied and recounted,
  * preserving the behavior of the existing automatic background pass.
  */
-export function refineAutoPattern(result: PatternResult, maxUsedColors: number): PatternResult {
+export function refineAutoPattern(
+  result: PatternResult,
+  maxUsedColors: number,
+  profile: 'shape' | 'balanced' | 'detail' = 'balanced',
+): PatternResult {
   if (!Number.isInteger(maxUsedColors) || maxUsedColors < 2 || maxUsedColors > 64) {
     throw new Error('自动精细化的最大用色数无效。');
   }
 
   const cells = result.cells.slice();
-  if (isFineGrid(result)) mergeLowContrastIsolatedCells(cells, result.grid.columns, result.grid.rows);
+  if (isFineGrid(result) && profile !== 'detail') {
+    mergeLowContrastIsolatedCells(cells, result.grid.columns, result.grid.rows, profile);
+  }
   const refined = recountResult(result, cells);
   if (refined.counts.length > maxUsedColors) {
     throw new Error('自动精细化后的实际用色数超过设定上限。');
@@ -166,7 +181,12 @@ function detectSimilarBorderBackground(cells: Uint16Array, columns: number, rows
   return background.sort((first, second) => first - second);
 }
 
-function mergeLowContrastIsolatedCells(cells: Uint16Array, columns: number, rows: number): void {
+function mergeLowContrastIsolatedCells(
+  cells: Uint16Array,
+  columns: number,
+  rows: number,
+  profile: 'shape' | 'balanced' | 'detail' = 'balanced',
+): void {
   const source = cells.slice();
   for (let row = 0; row < rows; row += 1) {
     for (let column = 0; column < columns; column += 1) {
@@ -202,7 +222,7 @@ function mergeLowContrastIsolatedCells(cells: Uint16Array, columns: number, rows
       }
       if (
         replacement !== EMPTY_CELL &&
-        replacementCount >= 4 &&
+        replacementCount >= (profile === 'shape' ? 3 : 4) &&
         replacementCount * 2 > nonEmptyNeighbors &&
         colorDistance(current, replacement) <= ISOLATED_CELL_DELTA_E_LIMIT
       ) cells[index] = replacement;

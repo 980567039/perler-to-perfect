@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { MARD_STANDARD_221_PALETTE } from './domain/mardPalette';
+import { ALGORITHM_VERSION } from './domain/types';
 import {
   createAutoGenerationSettings,
   decodeAutoSource,
@@ -52,7 +53,11 @@ export function AutoMode() {
 
         setStatus('正在精细化图纸…');
         bridge.sendProgress('refine', 0, 1);
-        const result = refineAutoPattern(backgroundRemoved, payload.settings.maxUsedColors);
+        const result = refineAutoPattern(
+          backgroundRemoved,
+          payload.settings.maxUsedColors,
+          payload.settings.profile ?? 'balanced',
+        );
         bridge.sendProgress('refine', 1, 1);
         if (result.counts.length === 0) {
           throw new Error('背景移除后没有可用拼豆格，请进入 Perler 工作台手动调整。');
@@ -77,6 +82,9 @@ export function AutoMode() {
           columns: result.grid.columns,
           rows: result.grid.rows,
           usedColors: result.counts.length,
+          profile: payload.settings.profile ?? 'detail',
+          algorithmVersion: ALGORITHM_VERSION,
+          sourceKind: payload.settings.sourceKind ?? 'original',
         });
         if (!disposed) setStatus('图纸已回传 RedInk。');
       } catch (error) {

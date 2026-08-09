@@ -27,6 +27,9 @@ export interface PatternMetadata {
   columns: number;
   rows: number;
   usedColors: number;
+  profile?: 'shape' | 'balanced' | 'detail';
+  algorithmVersion?: string;
+  sourceKind?: 'original' | 'bead-source';
 }
 
 interface BridgeMessage {

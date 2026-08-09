@@ -3,6 +3,7 @@ import type { PatternMetadata, RedinkImageContext } from './redinkBridge';
 
 const CHANNEL = 'redink-perler-auto';
 const VERSION = 1 as const;
+const FEATURE_PROTOCOL_VERSION = 2 as const;
 const MAX_PATTERN_BYTES = 20 * 1024 * 1024;
 const MAX_PREVIEW_BYTES = 10 * 1024 * 1024;
 const ALLOWED_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
@@ -22,6 +23,9 @@ export interface AutoGenerationSettings {
   columns: number;
   rows: number;
   maxUsedColors: number;
+  profile?: 'shape' | 'balanced' | 'detail';
+  sourceKind?: 'original' | 'bead-source';
+  sourceImageIndex?: number;
   removeBorderBackground: true;
 }
 
@@ -35,6 +39,7 @@ export interface RedinkAutoGeneratePayload {
 interface AutoBridgeMessage {
   channel: typeof CHANNEL;
   version: typeof VERSION;
+  protocolVersion?: typeof FEATURE_PROTOCOL_VERSION;
   type: string;
   requestId?: string;
   context?: RedinkImageContext;
@@ -78,6 +83,9 @@ function isValidSettings(value: unknown): value is AutoGenerationSettings {
     Number.isInteger(settings.columns) && settings.columns! >= 1 && settings.columns! <= 300 &&
     Number.isInteger(settings.rows) && settings.rows! >= 1 && settings.rows! <= 300 &&
     Number.isInteger(settings.maxUsedColors) && settings.maxUsedColors! >= 2 && settings.maxUsedColors! <= 64 &&
+    (settings.profile === undefined || ['shape', 'balanced', 'detail'].includes(settings.profile)) &&
+    (settings.sourceKind === undefined || ['original', 'bead-source'].includes(settings.sourceKind)) &&
+    (settings.sourceImageIndex === undefined || (Number.isInteger(settings.sourceImageIndex) && settings.sourceImageIndex >= 0 && settings.sourceImageIndex <= 300)) &&
     settings.removeBorderBackground === true
   );
 }
@@ -110,7 +118,9 @@ export class RedinkAutoBridge {
     const requestedId = params.get('handoff');
     const origin = configuredRedinkOrigin();
     this.requestId = requestedId && REQUEST_ID_PATTERN.test(requestedId) ? requestedId : null;
-    this.parentWindow = window.parent !== window ? window.parent : null;
+    // Rednote may embed this page or open it as a popup.  Both relationships
+    // are checked again for every incoming message below.
+    this.parentWindow = window.parent !== window ? window.parent : window.opener;
     this.redinkOrigin = origin || '';
     this.connected = Boolean(this.requestId && this.parentWindow && origin && params.get('mode') === 'auto');
     this.onGenerate = onGenerate;
@@ -118,7 +128,7 @@ export class RedinkAutoBridge {
     if (this.connected) {
       window.addEventListener('message', this.handleMessage);
       this.parentWindow!.postMessage(
-        { channel: CHANNEL, version: VERSION, type: 'AUTO_READY', requestId: this.requestId },
+        { channel: CHANNEL, version: VERSION, protocolVersion: FEATURE_PROTOCOL_VERSION, type: 'AUTO_READY', requestId: this.requestId },
         this.redinkOrigin,
       );
     }
@@ -148,6 +158,7 @@ export class RedinkAutoBridge {
     this.post(
       {
         type: 'AUTO_PATTERN_READY',
+        protocolVersion: FEATURE_PROTOCOL_VERSION,
         pattern,
         mimeType: 'image/png',
         preview: previewBuffer,

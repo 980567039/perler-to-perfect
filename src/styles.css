@@ -203,6 +203,21 @@ button:disabled {
   font-size: 10px;
 }
 
+.pattern-diagnostics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.pattern-diagnostics span {
+  padding: 4px 6px;
+  border: 1px solid var(--line);
+  background: #f4f1eb;
+}
+
 .source-preview {
   display: grid;
   grid-template-columns: 58px 1fr;

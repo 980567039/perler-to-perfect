@@ -235,4 +235,32 @@ describe('pattern generation', () => {
       expect.objectContaining({ colorId: 'test:black', count: 1 }),
     ]));
   });
+
+  it('regularizes a low-contrast isolated bead without using global cleanup', () => {
+    const colors = Array<string>(9).fill('#808080');
+    colors[4] = '#909090';
+    const result = generatePattern(
+      gridSample(3, 3, colors),
+      adaptivePalette,
+      adaptiveSettings(3, 3, {
+        cleanupRegionSize: 0,
+        structureStrength: 0.8,
+        renderProfile: 'shape',
+      }),
+    );
+    expect([...result.cells]).toEqual(Array<number>(9).fill(0));
+    expect(result.diagnostics?.noiseScore).toBeGreaterThan(0);
+    expect(result.diagnostics?.reasons[4]).toBe('noise');
+  });
+
+  it('returns three deterministic profiles from one sampled image', async () => {
+    const { generatePatternCandidates } = await import('./generation');
+    const candidates = generatePatternCandidates(
+      gridSample(3, 3, Array<string>(9).fill('#808080')),
+      adaptivePalette,
+      adaptiveSettings(3, 3, { maxUsedColors: 3 }),
+    );
+    expect(candidates.map((candidate) => candidate.profile)).toEqual(['shape', 'balanced', 'detail']);
+    expect(candidates.every((candidate) => candidate.result.cells.length === 9)).toBe(true);
+  });
 });

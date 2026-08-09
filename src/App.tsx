@@ -186,7 +186,11 @@ export function App() {
       store.setPattern(result);
       const firstUsed = result.selectedPaletteIndices[0];
       if (firstUsed !== undefined) setSelectedPaletteIndex(firstUsed);
-      setNotice(`生成完成：${result.grid.columns}×${result.grid.rows}，${result.counts.length} 色，${result.totalBeads} 颗。`);
+      const diagnostics = result.diagnostics;
+      setNotice(
+        `生成完成：${result.grid.columns}×${result.grid.rows}，${result.counts.length} 色，${result.totalBeads} 颗。` +
+        (diagnostics ? ` 结构 ${Math.round(diagnostics.structureScore * 100)}% · 自动降噪 ${Math.round(diagnostics.noiseScore * 100)}%。` : ''),
+      );
     } catch (reason) {
       if (reason instanceof Error && reason.message === '任务已取消。') {
         setNotice('已取消生成任务。');
@@ -488,6 +492,25 @@ export function App() {
               <strong>{store.palette.edition}</strong>
               <span>{store.palette.colors.length} 个可用色号</span>
             </div>
+            <label className="field-stack">
+              成图策略
+              <select
+                value={store.settings.renderProfile ?? 'balanced'}
+                onChange={(event) => {
+                  const renderProfile = event.target.value as 'shape' | 'balanced' | 'detail';
+                  const profileSettings = {
+                    shape: { detailPriority: false, structureStrength: 0.86, cleanupRegionSize: 2 as const },
+                    balanced: { detailPriority: true, structureStrength: 0.6, cleanupRegionSize: 2 as const },
+                    detail: { detailPriority: true, structureStrength: 0.22, cleanupRegionSize: 1 as const },
+                  }[renderProfile];
+                  updateSetting({ renderProfile, ...profileSettings });
+                }}
+              >
+                <option value="shape">轮廓优先（最干净）</option>
+                <option value="balanced">平衡（推荐）</option>
+                <option value="detail">细节优先（保留更多特征）</option>
+              </select>
+            </label>
             <label className={`detail-priority-toggle ${store.settings.detailPriority ? 'active' : ''}`}>
               <input
                 type="checkbox"
@@ -662,6 +685,13 @@ export function App() {
                   </>
                 )}
               </div>
+              {store.diagnostics ? (
+                <div className="pattern-diagnostics">
+                  <span>结构保留 {Math.round(store.diagnostics.structureScore * 100)}%</span>
+                  <span>自动降噪 {Math.round(store.diagnostics.noiseScore * 100)}%</span>
+                  <span>低置信格 {store.diagnostics.confidence.filter((value) => value < 42).length}</span>
+                </div>
+              ) : null}
             </>
           ) : (
             <div className="empty-stage">

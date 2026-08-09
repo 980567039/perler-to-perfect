@@ -88,6 +88,7 @@ workerScope.onmessage = (event: MessageEvent<GenerateRequest>) => {
       onProgress: (progress) => post({ type: 'PROGRESS', jobId, ...progress }),
     });
     const cellsBuffer = result.cells.buffer as ArrayBuffer;
+    const confidenceBuffer = result.diagnostics?.confidence.buffer as ArrayBuffer | undefined;
     post(
       {
         type: 'RESULT',
@@ -97,8 +98,16 @@ workerScope.onmessage = (event: MessageEvent<GenerateRequest>) => {
         counts: result.counts,
         totalBeads: result.totalBeads,
         selectedPaletteIndices: result.selectedPaletteIndices,
+        diagnostics: result.diagnostics
+          ? {
+              confidence: confidenceBuffer!,
+              reasons: result.diagnostics.reasons,
+              structureScore: result.diagnostics.structureScore,
+              noiseScore: result.diagnostics.noiseScore,
+            }
+          : undefined,
       },
-      [cellsBuffer],
+      confidenceBuffer ? [cellsBuffer, confidenceBuffer] : [cellsBuffer],
     );
   } catch (error) {
     bitmap.close();

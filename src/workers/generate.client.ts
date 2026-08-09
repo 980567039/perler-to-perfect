@@ -43,6 +43,14 @@ export function startGeneration(
         counts: message.counts,
         totalBeads: message.totalBeads,
         selectedPaletteIndices: message.selectedPaletteIndices,
+        diagnostics: message.diagnostics
+          ? {
+              confidence: new Uint8Array(message.diagnostics.confidence),
+              reasons: message.diagnostics.reasons,
+              structureScore: message.diagnostics.structureScore,
+              noiseScore: message.diagnostics.noiseScore,
+            }
+          : undefined,
       });
     };
     worker.onerror = (event) => {

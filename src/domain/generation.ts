@@ -1,5 +1,6 @@
 import { deltaE2000, hexToLab, rgbToLab } from './color';
 import { countCells, validateGridSize } from './grid';
+import { buildPatternDiagnostics, regularizeStructure } from './structure';
 import {
   EMPTY_CELL,
   type GenerationSettings,
@@ -528,7 +529,19 @@ export function generatePattern(
   if (buckets.length === 0) {
     const emptyCells = new Uint16Array(cellCount);
     emptyCells.fill(EMPTY_CELL);
-    return { grid: settings.grid, cells: emptyCells, counts: [], totalBeads: 0, selectedPaletteIndices: [] };
+    return {
+      grid: settings.grid,
+      cells: emptyCells,
+      counts: [],
+      totalBeads: 0,
+      selectedPaletteIndices: [],
+      diagnostics: {
+        confidence: new Uint8Array(cellCount),
+        reasons: new Array(cellCount).fill('flat'),
+        structureScore: 1,
+        noiseScore: 0,
+      },
+    };
   }
 
   options.onProgress?.({ stage: 'select', completed: 0, total: 2 });
@@ -584,10 +597,19 @@ export function generatePattern(
       .map((id) => paletteIndexById.get(id))
       .filter((value): value is number => value !== undefined),
   );
+  const structureStrength = settings.structureStrength ?? 0;
+  const structural = regularizeStructure(mapped, settings.grid, paletteLabs, representatives, structureStrength);
+  const cleanupThreshold = settings.sourceMode === 'bead-source'
+    ? settings.renderProfile === 'shape'
+      ? Math.max(settings.cleanupRegionSize, 2)
+      : settings.renderProfile === 'detail'
+        ? Math.min(settings.cleanupRegionSize, 1)
+        : settings.cleanupRegionSize
+    : settings.cleanupRegionSize;
   const cells = cleanupSmallRegions(
-    mapped,
+    structural.cells,
     settings.grid,
-    settings.cleanupRegionSize,
+    cleanupThreshold,
     paletteLabs,
     lockedPaletteIndices,
     representatives,
@@ -595,13 +617,52 @@ export function generatePattern(
   );
   options.onProgress?.({ stage: 'cleanup', completed: 1, total: 1 });
   const { counts, totalBeads } = countCells(cells, settings.grid, palette);
+  const diagnostics = buildPatternDiagnostics(
+    cells,
+    settings.grid,
+    paletteLabs,
+    selectedEnabledIndices.map((position) => enabledIndices[position]!).filter((value): value is number => value !== undefined),
+    representatives,
+    structural.changed,
+  );
   return {
     grid: settings.grid,
     cells,
     counts,
     totalBeads,
     selectedPaletteIndices: counts.map((entry) => entry.paletteIndex),
+    diagnostics,
   };
+}
+
+export interface PatternCandidate {
+  profile: 'shape' | 'balanced' | 'detail';
+  result: PatternResult;
+}
+
+/**
+ * Generate the three user-facing trade-offs from the same sampled source.
+ * Feature extraction is deterministic; callers can run this in a Worker and
+ * present the candidates side by side without exposing internal thresholds.
+ */
+export function generatePatternCandidates(
+  sampledImage: ImageData,
+  palette: PaletteManifest,
+  settings: GenerationSettings,
+  options: {
+    onProgress?: (progress: GenerationProgress) => void;
+    isCancelled?: () => boolean;
+  } = {},
+): PatternCandidate[] {
+  const profiles: Array<['shape' | 'balanced' | 'detail', Partial<GenerationSettings>]> = [
+    ['shape', { detailPriority: false, structureStrength: 0.86, cleanupRegionSize: Math.max(settings.cleanupRegionSize, 2) as 0 | 1 | 2 | 3 | 4 }],
+    ['balanced', { detailPriority: true, structureStrength: 0.6, cleanupRegionSize: 2 }],
+    ['detail', { detailPriority: true, structureStrength: 0.22, cleanupRegionSize: Math.min(settings.cleanupRegionSize, 1) as 0 | 1 | 2 | 3 | 4 }],
+  ];
+  return profiles.map(([profile, patch]) => ({
+    profile,
+    result: generatePattern(sampledImage, palette, { ...settings, ...patch, renderProfile: profile }, options),
+  }));
 }
 
 export const GENERATION_SAMPLE_SCALE = SAMPLE_SCALE;

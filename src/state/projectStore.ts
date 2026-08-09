@@ -34,6 +34,7 @@ interface ProjectState {
   totalBeads: number;
   selectedPaletteIndices: number[];
   source: SourceMetadata | null;
+  diagnostics: PatternResult['diagnostics'];
   history: EditPatch[];
   future: EditPatch[];
   manuallyEdited: Set<number>;
@@ -83,6 +84,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   totalBeads: 0,
   selectedPaletteIndices: [],
   source: null,
+  diagnostics: undefined,
   history: [],
   future: [],
   manuallyEdited: new Set<number>(),
@@ -102,6 +104,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       counts: [],
       totalBeads: 0,
       selectedPaletteIndices: [],
+      diagnostics: undefined,
       history: [],
       future: [],
       manuallyEdited: new Set<number>(),
@@ -116,6 +119,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       counts: [],
       totalBeads: 0,
       selectedPaletteIndices: [],
+      diagnostics: undefined,
       history: [],
       future: [],
       manuallyEdited: new Set<number>(),
@@ -129,6 +133,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       counts: result.counts,
       totalBeads: result.totalBeads,
       selectedPaletteIndices: result.selectedPaletteIndices,
+      diagnostics: result.diagnostics,
       history: [],
       future: [],
       manuallyEdited: new Set<number>(),
@@ -250,6 +255,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       counts,
       totalBeads,
       selectedPaletteIndices: counts.map((entry) => entry.paletteIndex),
+      diagnostics: undefined,
       source: project.source,
       watermarkEnabled: project.watermarkEnabled ?? true,
       history: [],
@@ -266,6 +272,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       counts: [],
       totalBeads: 0,
       selectedPaletteIndices: [],
+      diagnostics: undefined,
       history: [],
       future: [],
       manuallyEdited: new Set<number>(),
