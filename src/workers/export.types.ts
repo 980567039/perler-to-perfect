@@ -26,6 +26,13 @@ export type PatternExportRequest = ExportRequest | MasterExportRequest;
 
 export type ExportResponse =
   | { type: 'PROGRESS'; jobId: string; completed: number; total: number; stage: string }
-  | { type: 'RESULT'; jobId: string; master: ArrayBuffer; archive: ArrayBuffer }
+  | {
+      type: 'RESULT';
+      jobId: string;
+      grid: ArrayBuffer;
+      beads: ArrayBuffer;
+      ironed: ArrayBuffer;
+      archive: ArrayBuffer;
+    }
   | { type: 'MASTER_RESULT'; jobId: string; master: ArrayBuffer }
   | { type: 'ERROR'; jobId: string; message: string };

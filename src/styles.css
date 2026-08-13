@@ -698,12 +698,31 @@ input[type="range"] {
   cursor: crosshair;
 }
 
-.canvas-shell.is-preview canvas {
+.canvas-shell.visual-beads canvas,
+.canvas-shell.visual-ironed canvas {
   cursor: grab;
 }
 
-.canvas-shell.is-preview canvas:active {
+.canvas-shell.visual-beads canvas:active,
+.canvas-shell.visual-ironed canvas:active {
   cursor: grabbing;
+}
+
+.visual-mode-group button {
+  font-weight: 750;
+}
+
+.grid-overlay-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #4b5563;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.grid-overlay-toggle input {
+  accent-color: var(--accent);
 }
 
 .canvas-hud {

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { contrastTextColor } from '../domain/color';
-import { EMPTY_CELL, type GridSize, type PaletteManifest } from '../domain/types';
+import { EMPTY_CELL, type GridSize, type PaletteManifest, type PatternVisualMode } from '../domain/types';
+import { drawPatternVisual } from '../rendering/patternDrawing';
 import { drawWatermark } from '../rendering/watermark';
 
 export type EditorTool = 'paint' | 'eyedropper' | 'wand' | 'lasso' | 'erase' | 'pan';
@@ -17,7 +17,8 @@ interface PatternCanvasProps {
   tool: EditorTool;
   selectedPaletteIndex: number;
   backgroundPreview: number[];
-  previewMode: boolean;
+  visualMode: PatternVisualMode;
+  showGridOverlay: boolean;
   watermarkEnabled: boolean;
   onPaint: (indices: number[], value: number) => void;
   onPickColor: (paletteIndex: number | null) => void;
@@ -37,7 +38,8 @@ export function PatternCanvas({
   tool,
   selectedPaletteIndex,
   backgroundPreview,
-  previewMode,
+  visualMode,
+  showGridOverlay,
   watermarkEnabled,
   onPaint,
   onPickColor,
@@ -60,18 +62,23 @@ export function PatternCanvas({
   const previewSet = useMemo(() => new Set(backgroundPreview), [backgroundPreview]);
   const [lassoPath, setLassoPath] = useState<CanvasPoint[]>([]);
 
-  const fit = useCallback(() => {
-    const padding = 32;
-    const scale = Math.max(
+  const fit = useCallback((overview = false) => {
+    const padding = visualMode === 'grid' ? 56 : 32;
+    const fitScale = Math.max(
       1,
       Math.min(24, Math.min((size.width - padding * 2) / grid.columns, (size.height - padding * 2) / grid.rows)),
     );
+    // A full 1–N ruler and three-character bead codes cannot be read at the
+    // 4–5px overview scale of a 104×104 board. Enter the grid view at a
+    // production-friendly inspection scale; the explicit fit button remains
+    // available for the whole-board overview.
+    const scale = visualMode === 'grid' && !overview ? Math.min(24, Math.max(18, fitScale)) : fitScale;
     setViewport({
       scale,
       offsetX: (size.width - grid.columns * scale) / 2,
       offsetY: (size.height - grid.rows * scale) / 2,
     });
-  }, [grid.columns, grid.rows, size.height, size.width]);
+  }, [grid.columns, grid.rows, size.height, size.width, visualMode]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -107,40 +114,24 @@ export function PatternCanvas({
     const startRow = Math.max(0, Math.floor(-offsetY / scale));
     const endRow = Math.min(grid.rows, Math.ceil((size.height - offsetY) / scale));
 
-    context.textAlign = 'center';
-    context.textBaseline = 'middle';
-    for (let row = startRow; row < endRow; row += 1) {
-      for (let column = startColumn; column < endColumn; column += 1) {
-        const index = row * grid.columns + column;
-        const value = cells[index] ?? EMPTY_CELL;
-        const x = offsetX + column * scale;
-        const y = offsetY + row * scale;
-        if (value === EMPTY_CELL) {
-          context.fillStyle = (row + column) % 2 === 0 ? '#FFFFFF' : '#F7F5F1';
-        } else {
-          context.fillStyle = palette.colors[value]?.srgbHex ?? '#FF00FF';
-        }
-        context.fillRect(x, y, scale, scale);
-        if (previewSet.has(index)) {
-          context.fillStyle = 'rgba(220, 38, 38, 0.48)';
-          context.fillRect(x, y, scale, scale);
-        }
-        if (!previewMode && value !== EMPTY_CELL && scale >= 18) {
-          const color = palette.colors[value];
-          if (color) {
-            const fontSize = Math.max(7, Math.min(12, Math.floor(scale * 0.38)));
-            context.font = `700 ${fontSize}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;
-            context.fillStyle = contrastTextColor(color.srgbHex);
-            context.save();
-            context.beginPath();
-            context.rect(x + 1, y + 1, scale - 2, scale - 2);
-            context.clip();
-            context.fillText(color.code, x + scale / 2, y + scale / 2);
-            context.restore();
-          }
-        }
-      }
-    }
+    context.save();
+    context.translate(offsetX + startColumn * scale, offsetY + startRow * scale);
+    drawPatternVisual(context, {
+      cells,
+      fullGrid: grid,
+      palette,
+      startRow,
+      startColumn,
+      rows: Math.max(0, endRow - startRow),
+      columns: Math.max(0, endColumn - startColumn),
+      cellPixels: scale,
+      visualMode,
+      showGridOverlay,
+      watermarkEnabled: false,
+      showCoordinates: false,
+      includeAxes: false,
+    });
+    context.restore();
 
     if (watermarkEnabled) {
       drawWatermark(context, {
@@ -152,71 +143,33 @@ export function PatternCanvas({
       });
     }
 
-    if (!previewMode) {
-      context.strokeStyle = 'rgba(55, 65, 81, 0.22)';
-      context.lineWidth = 1;
-      context.beginPath();
-      for (let column = startColumn; column <= endColumn; column += 1) {
-        const x = Math.round(offsetX + column * scale) + 0.5;
-        context.moveTo(x, Math.max(0, offsetY + startRow * scale));
-        context.lineTo(x, Math.min(size.height, offsetY + endRow * scale));
-      }
-      for (let row = startRow; row <= endRow; row += 1) {
-        const y = Math.round(offsetY + row * scale) + 0.5;
-        context.moveTo(Math.max(0, offsetX + startColumn * scale), y);
-        context.lineTo(Math.min(size.width, offsetX + endColumn * scale), y);
-      }
-      context.stroke();
-
-      context.strokeStyle = 'rgba(220, 38, 38, 0.75)';
-      context.lineWidth = 1.5;
-      context.beginPath();
-      for (let column = Math.max(10, Math.ceil(startColumn / 10) * 10); column < endColumn; column += 10) {
-        const x = offsetX + column * scale;
-        context.moveTo(x, Math.max(0, offsetY));
-        context.lineTo(x, Math.min(size.height, offsetY + grid.rows * scale));
-      }
-      for (let row = Math.max(10, Math.ceil(startRow / 10) * 10); row < endRow; row += 10) {
-        const y = offsetY + row * scale;
-        context.moveTo(Math.max(0, offsetX), y);
-        context.lineTo(Math.min(size.width, offsetX + grid.columns * scale), y);
-      }
-      context.stroke();
-
-      context.strokeStyle = '#111827';
-      context.lineWidth = 2;
-      context.strokeRect(offsetX, offsetY, grid.columns * scale, grid.rows * scale);
-
-      // Keep the coordinate helpers readable at the default 104×104 view.
-      // As the user zooms in, progressively finer labels become available.
-      const labelStep = scale >= 18 ? 1 : scale >= 8 ? 5 : 10;
-      const shouldLabel = (value: number, maximum: number) =>
-        value === 1 ||
-        value === maximum ||
-        (value % labelStep === 0 && (labelStep === 1 || maximum - value >= labelStep / 2));
-      const axisFontSize = Math.max(9, Math.min(12, scale >= 18 ? Math.floor(scale * 0.38) : 10));
-      context.font = `600 ${axisFontSize}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;
-      context.fillStyle = '#4B5563';
-      context.textBaseline = 'middle';
-
-      const topLabelY = Math.max(8, Math.min(size.height - 8, offsetY - 9));
-      context.textAlign = 'center';
+    for (let row = startRow; row < endRow; row += 1) {
       for (let column = startColumn; column < endColumn; column += 1) {
-        const label = column + 1;
-        if (!shouldLabel(label, grid.columns)) continue;
-        context.fillText(label.toString(), offsetX + (column + 0.5) * scale, topLabelY);
-      }
-
-      const leftLabelX = Math.max(28, Math.min(size.width - 8, offsetX - 9));
-      context.textAlign = 'right';
-      for (let row = startRow; row < endRow; row += 1) {
-        const label = row + 1;
-        if (!shouldLabel(label, grid.rows)) continue;
-        context.fillText(label.toString(), leftLabelX, offsetY + (row + 0.5) * scale);
+        const index = row * grid.columns + column;
+        if (!previewSet.has(index)) continue;
+        context.fillStyle = 'rgba(220, 38, 38, 0.48)';
+        context.fillRect(offsetX + column * scale, offsetY + row * scale, scale, scale);
       }
     }
 
-    if (!previewMode && lassoPath.length > 1) {
+    if (visualMode === 'grid') {
+      const axisFontSize = scale >= 12 ? Math.min(13, Math.max(9, Math.floor(scale * 0.5))) : Math.max(6, Math.floor(scale * 0.38));
+      context.font = `600 ${axisFontSize}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;
+      context.fillStyle = '#4B5563';
+      context.textBaseline = 'middle';
+      context.textAlign = 'center';
+      const topLabelY = Math.max(7, Math.min(size.height - 7, offsetY - 9));
+      for (let column = startColumn; column < endColumn; column += 1) {
+        context.fillText(String(column + 1), offsetX + (column + 0.5) * scale, topLabelY);
+      }
+      const leftLabelX = Math.max(22, Math.min(size.width - 7, offsetX - 9));
+      context.textAlign = 'right';
+      for (let row = startRow; row < endRow; row += 1) {
+        context.fillText(String(row + 1), leftLabelX, offsetY + (row + 0.5) * scale);
+      }
+    }
+
+    if (lassoPath.length > 1) {
       context.save();
       context.strokeStyle = '#2563EB';
       context.fillStyle = 'rgba(37, 99, 235, 0.12)';
@@ -230,7 +183,7 @@ export function PatternCanvas({
       context.fill();
       context.restore();
     }
-  }, [backgroundPreview, cells, grid, lassoPath, palette.colors, previewMode, previewSet, size, viewport, watermarkEnabled]);
+  }, [cells, grid, lassoPath, palette, previewSet, showGridOverlay, size, viewport, visualMode, watermarkEnabled]);
 
   const eventCell = (event: React.PointerEvent<HTMLCanvasElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
@@ -245,7 +198,7 @@ export function PatternCanvas({
   const handlePointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
     event.currentTarget.setPointerCapture(event.pointerId);
     const rect = event.currentTarget.getBoundingClientRect();
-    const mode: EditorTool = previewMode || event.button === 1 || event.button === 2 ? 'pan' : tool;
+    const mode: EditorTool = event.button === 1 || event.button === 2 ? 'pan' : tool;
     const cell = eventCell(event);
     if (mode === 'eyedropper') {
       const value = cell ? cells[cell.index] ?? EMPTY_CELL : EMPTY_CELL;
@@ -348,10 +301,10 @@ export function PatternCanvas({
   };
 
   return (
-    <div className={`canvas-shell ${previewMode ? 'is-preview' : ''}`} ref={containerRef}>
+    <div className={`canvas-shell visual-${visualMode}`} ref={containerRef}>
       <canvas
         ref={canvasRef}
-        aria-label={`拼豆图纸画布，${grid.columns} 列 ${grid.rows} 行`}
+        aria-label={`${visualMode === 'beads' ? '拼豆实物' : visualMode === 'ironed' ? '熨烫成品' : '方格图纸'}画布，${grid.columns} 列 ${grid.rows} 行`}
         onContextMenu={(event) => event.preventDefault()}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
@@ -361,7 +314,7 @@ export function PatternCanvas({
         onWheel={handleWheel}
       />
       <div className="canvas-hud">
-        <button type="button" className="small-button" onClick={fit}>
+        <button type="button" className="small-button" onClick={() => fit(true)}>
           适合窗口
         </button>
         <span>{Math.round(viewport.scale * 10) / 10}px/格</span>

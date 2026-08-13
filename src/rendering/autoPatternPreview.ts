@@ -1,5 +1,6 @@
 import { assertCellBuffer } from '../domain/grid';
-import { EMPTY_CELL, type GridSize, type PaletteManifest } from '../domain/types';
+import { type GridSize, type PaletteManifest } from '../domain/types';
+import { drawPatternVisual } from './patternDrawing';
 
 const PREVIEW_LONGEST_SIDE = 1040;
 
@@ -30,19 +31,19 @@ export async function renderAutoPatternPreview(input: {
   const context = canvas.getContext('2d');
   if (!context) throw new Error('无法创建自动效果图画布。');
 
-  context.imageSmoothingEnabled = false;
-  context.fillStyle = '#FFFFFF';
-  context.fillRect(0, 0, width, height);
-  for (let row = 0; row < input.grid.rows; row += 1) {
-    for (let column = 0; column < input.grid.columns; column += 1) {
-      const value = input.cells[row * input.grid.columns + column];
-      if (value === undefined || value === EMPTY_CELL) continue;
-      const color = input.palette.colors[value];
-      if (!color) continue;
-      context.fillStyle = color.srgbHex;
-      context.fillRect(column * cellPixels, row * cellPixels, cellPixels, cellPixels);
-    }
-  }
+  drawPatternVisual(context, {
+    cells: input.cells,
+    fullGrid: input.grid,
+    palette: input.palette,
+    startRow: 0,
+    startColumn: 0,
+    rows: input.grid.rows,
+    columns: input.grid.columns,
+    cellPixels,
+    visualMode: 'beads',
+    showGridOverlay: false,
+    watermarkEnabled: false,
+  });
 
   const preview = await canvas.convertToBlob({ type: 'image/png' });
   if (preview.type !== 'image/png' || preview.size === 0) {

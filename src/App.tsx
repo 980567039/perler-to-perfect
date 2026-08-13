@@ -2,7 +2,13 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { CropPreview } from './components/CropPreview';
 import { PatternCanvas, type EditorTool } from './components/PatternCanvas';
 import { PalettePanel } from './components/PalettePanel';
-import { ALGORITHM_VERSION, MAX_SOURCE_BYTES, MAX_SOURCE_PIXELS, type GenerateResponse } from './domain/types';
+import {
+  ALGORITHM_VERSION,
+  MAX_SOURCE_BYTES,
+  MAX_SOURCE_PIXELS,
+  type GenerateResponse,
+  type PatternVisualMode,
+} from './domain/types';
 import { MARD_STANDARD_221_PALETTE } from './domain/mardPalette';
 import { paletteFromFileContents } from './domain/palette';
 import { loadMostRecentProject, saveProject } from './persistence/database';
@@ -50,7 +56,8 @@ export function App() {
   const [sourceDimensions, setSourceDimensions] = useState<{ width: number; height: number } | null>(null);
   const [selectedPaletteIndex, setSelectedPaletteIndex] = useState(0);
   const [tool, setTool] = useState<EditorTool>('paint');
-  const [previewMode, setPreviewMode] = useState(false);
+  const [visualMode, setVisualMode] = useState<PatternVisualMode>('beads');
+  const [showGridOverlay, setShowGridOverlay] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [generationProgress, setGenerationProgress] = useState({ label: '', completed: 0, total: 1 });
   const [isExporting, setIsExporting] = useState(false);
@@ -373,17 +380,19 @@ export function App() {
         (message) =>
           setExportProgress({ label: message.stage, completed: message.completed, total: Math.max(1, message.total) }),
       );
-      downloadBlob(result.master, `${fileStem}-master.png`);
+      downloadBlob(result.beads, `${fileStem}-beads.png`);
+      downloadBlob(result.grid, `${fileStem}-grid.png`);
+      downloadBlob(result.ironed, `${fileStem}-ironed.png`);
       downloadBlob(result.archive, `${fileStem}-png.zip`);
       if (redinkBridge.current?.connected && handoffContext) {
-        await redinkBridge.current.sendPattern(result.master, {
+        await redinkBridge.current.sendPattern(result.grid, {
           columns: store.settings.grid.columns,
           rows: store.settings.grid.rows,
           usedColors: store.counts.length,
         });
-        setNotice('母版 PNG 已回传 RedInk，等待确认后追加到原子主题末尾。');
+        setNotice('三种效果图与 ZIP 已生成；方格图纸已回传 RedInk，等待确认后追加到原子主题末尾。');
       } else {
-        setNotice('母版 PNG 与分块 ZIP 已生成。');
+        setNotice('拼豆实物、方格图纸、熨烫成品和分块 ZIP 已生成。');
       }
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '导出失败。');
@@ -611,7 +620,7 @@ export function App() {
                 <button
                   type="button"
                   className={tool === value ? 'active' : ''}
-                  disabled={!store.cells || previewMode}
+                  disabled={!store.cells}
                   key={value}
                   onClick={() => setTool(value)}
                 >
@@ -620,24 +629,42 @@ export function App() {
               ))}
             </div>
             <div className="tool-group">
-              <button type="button" disabled={previewMode || store.history.length === 0} onClick={store.undo}>
+              <button type="button" disabled={store.history.length === 0} onClick={store.undo}>
                 撤销
               </button>
-              <button type="button" disabled={previewMode || store.future.length === 0} onClick={store.redo}>
+              <button type="button" disabled={store.future.length === 0} onClick={store.redo}>
                 重做
               </button>
             </div>
-            <div className="tool-group preview-toggle-group" aria-label="图纸视图">
-              <button
-                type="button"
-                className={previewMode ? 'active' : ''}
-                disabled={!store.cells}
-                aria-pressed={previewMode}
-                onClick={() => setPreviewMode((current) => !current)}
-              >
-                {previewMode ? '返回编辑' : '最终效果'}
-              </button>
+            <div className="tool-group visual-mode-group" aria-label="显示模式">
+              {(
+                [
+                  ['beads', '拼豆实物'],
+                  ['grid', '方格图纸'],
+                  ['ironed', '熨烫成品'],
+                ] as const
+              ).map(([value, label]) => (
+                <button
+                  type="button"
+                  className={visualMode === value ? 'active' : ''}
+                  disabled={!store.cells}
+                  aria-pressed={visualMode === value}
+                  key={value}
+                  onClick={() => setVisualMode(value)}
+                >
+                  {label}
+                </button>
+              ))}
             </div>
+            <label className="grid-overlay-toggle">
+              <input
+                type="checkbox"
+                checked={visualMode === 'grid' || showGridOverlay}
+                disabled={visualMode === 'grid'}
+                onChange={(event) => setShowGridOverlay(event.target.checked)}
+              />
+              定位网格
+            </label>
             <div className="stage-summary">
               <span>{store.settings.grid.columns}×{store.settings.grid.rows}</span>
               <span>{store.counts.length} 色</span>
@@ -654,7 +681,8 @@ export function App() {
                 tool={tool}
                 selectedPaletteIndex={selectedPaletteIndex}
                 backgroundPreview={store.backgroundPreview}
-                previewMode={previewMode}
+                visualMode={visualMode}
+                showGridOverlay={showGridOverlay}
                 watermarkEnabled={store.watermarkEnabled}
                 onPaint={store.paintCells}
                 onPickColor={handlePickColor}
@@ -781,11 +809,11 @@ export function App() {
               />
               <span>
                 <strong>显示水印</strong>
-                <small>编辑画布、最终效果和导出同步显示“8Bit像素画”</small>
+                <small>三种画布预览和导出同步显示“8Bit像素画”</small>
               </span>
             </label>
             <button type="button" className="primary-button" disabled={!store.cells || isExporting} onClick={() => void handlePatternExport()}>
-              {isExporting ? '正在导出…' : '导出母版 PNG + 分块 ZIP'}
+              {isExporting ? '正在导出…' : '导出三种效果 PNG + 分块 ZIP'}
             </button>
             {isExporting ? (
               <div className="progress-card compact">

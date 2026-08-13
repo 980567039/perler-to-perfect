@@ -13,7 +13,9 @@ interface ExportInput {
 }
 
 export interface ExportResult {
-  master: Blob;
+  grid: Blob;
+  beads: Blob;
+  ironed: Blob;
   archive: Blob;
 }
 
@@ -50,7 +52,9 @@ export function exportPattern(
         return;
       }
       resolve({
-        master: new Blob([message.master], { type: 'image/png' }),
+        grid: new Blob([message.grid], { type: 'image/png' }),
+        beads: new Blob([message.beads], { type: 'image/png' }),
+        ironed: new Blob([message.ironed], { type: 'image/png' }),
         archive: new Blob([message.archive], { type: 'application/zip' }),
       });
     };

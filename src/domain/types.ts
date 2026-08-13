@@ -10,6 +10,8 @@ export interface GridSize {
   rows: number;
 }
 
+export type PatternVisualMode = 'beads' | 'grid' | 'ironed';
+
 export interface RgbColor {
   r: number;
   g: number;

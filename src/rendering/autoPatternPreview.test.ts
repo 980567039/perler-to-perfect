@@ -24,14 +24,37 @@ describe('automatic clean pattern preview', () => {
     });
   });
 
-  it('renders solid palette squares over white without smoothing or annotations', async () => {
+  it('renders the default cylindrical bead preview without a grid overlay', async () => {
+    const arcs: number[][] = [];
     const fills: Array<{ color: string; x: number; y: number; width: number; height: number }> = [];
+    const gradient = { addColorStop: () => undefined } as CanvasGradient;
     const context = {
       imageSmoothingEnabled: true,
       fillStyle: '',
       fillRect: (x: number, y: number, width: number, height: number) => {
         fills.push({ color: context.fillStyle, x, y, width, height });
       },
+      strokeStyle: '',
+      lineWidth: 1,
+      textAlign: 'start',
+      textBaseline: 'alphabetic',
+      font: '',
+      save: () => undefined,
+      restore: () => undefined,
+      beginPath: () => undefined,
+      arc: (...args: number[]) => arcs.push(args),
+      fill: () => undefined,
+      stroke: () => undefined,
+      ellipse: () => undefined,
+      createRadialGradient: () => gradient,
+      createLinearGradient: () => gradient,
+      fillText: () => undefined,
+      measureText: () => ({ width: 1 }),
+      rect: () => undefined,
+      clip: () => undefined,
+      moveTo: () => undefined,
+      lineTo: () => undefined,
+      strokeRect: () => undefined,
     };
     let canvasSize: { width: number; height: number } | null = null;
     class FakeOffscreenCanvas {
@@ -57,12 +80,10 @@ describe('automatic clean pattern preview', () => {
     });
 
     expect(canvasSize).toEqual({ width: 1040, height: 1040 });
-    expect(context.imageSmoothingEnabled).toBe(false);
-    expect(fills).toEqual([
-      { color: '#FFFFFF', x: 0, y: 0, width: 1040, height: 1040 },
-      { color: MARD_STANDARD_221_PALETTE.colors[0]?.srgbHex, x: 0, y: 0, width: 520, height: 520 },
-      { color: MARD_STANDARD_221_PALETTE.colors[1]?.srgbHex, x: 520, y: 520, width: 520, height: 520 },
-    ]);
+    expect(context.imageSmoothingEnabled).toBe(true);
+    expect(fills).toEqual([{ color: '#E8E3DA', x: 0, y: 0, width: 1040, height: 1040 }]);
+    // Two occupied cells each receive a shadow, body, hole and highlight arc.
+    expect(arcs).toHaveLength(8);
     expect(preview.type).toBe('image/png');
   });
 });
