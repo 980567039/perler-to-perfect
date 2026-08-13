@@ -63,8 +63,12 @@ describe('pattern visual drawing', () => {
   it('renders cylindrical beads with circular bodies and a center hole', () => {
     const { context, calls } = createContext();
     drawPatternVisual(context, { ...base, visualMode: 'beads' });
-    // Three occupied cells × (shadow, body, hole, hole highlight arc).
-    expect(calls.filter((call) => call.name === 'arc')).toHaveLength(12);
+    // Three occupied cells × (shadow, body, inner wall, opening, two inner highlights).
+    expect(calls.filter((call) => call.name === 'arc')).toHaveLength(18);
+    const opening = calls.find(
+      (call) => call.name === 'arc' && Math.abs(Number(call.args[0]) - 10) < 0.01 && Math.abs(Number(call.args[1]) - 10) < 0.01,
+    );
+    expect(Number(opening?.args[2])).toBeGreaterThan(3);
     expect(calls.some((call) => call.name === 'fillRect' && call.args.includes(20))).toBe(false);
   });
 

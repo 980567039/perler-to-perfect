@@ -81,9 +81,9 @@ describe('automatic clean pattern preview', () => {
 
     expect(canvasSize).toEqual({ width: 1040, height: 1040 });
     expect(context.imageSmoothingEnabled).toBe(true);
-    expect(fills).toEqual([{ color: '#E8E3DA', x: 0, y: 0, width: 1040, height: 1040 }]);
-    // Two occupied cells each receive a shadow, body, hole and highlight arc.
-    expect(arcs).toHaveLength(8);
+    expect(fills).toEqual([{ color: '#242321', x: 0, y: 0, width: 1040, height: 1040 }]);
+    // Two occupied cells each receive a shadow, body, inner wall, opening and two inner highlights.
+    expect(arcs).toHaveLength(12);
     expect(preview.type).toBe('image/png');
   });
 });

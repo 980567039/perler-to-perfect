@@ -64,6 +64,8 @@ interface VisualTones {
   dark: RgbColor;
 }
 
+const BEAD_BOARD_COLOR = '#242321';
+
 const visualToneCache = new Map<string, VisualTones>();
 
 function tonesFor(hex: `#${string}`): VisualTones {
@@ -104,8 +106,10 @@ function drawFlatCell(
 function drawBead(context: PatternDrawingContext, x: number, y: number, cellPixels: number, hex: `#${string}`): void {
   const centerX = x + cellPixels / 2;
   const centerY = y + cellPixels / 2;
-  const radius = Math.max(0.7, cellPixels * 0.435);
-  const shadowRadius = Math.max(0.6, radius * 0.98);
+  // Beadify-style beads are distinct rings with breathing room around them,
+  // rather than almost edge-to-edge filled circles.
+  const radius = Math.max(0.7, cellPixels * 0.405);
+  const shadowRadius = Math.max(0.6, radius * 1.02);
   const { light, dark } = tonesFor(hex);
 
   context.save();
@@ -131,16 +135,33 @@ function drawBead(context: PatternDrawingContext, x: number, y: number, cellPixe
   context.arc(centerX, centerY, radius, 0, Math.PI * 2);
   context.fill();
 
-  if (cellPixels >= 6) {
-    const holeRadius = Math.min(2.3, Math.max(0.55, cellPixels * 0.105));
-    context.fillStyle = colorString(dark, Math.min(0.28, 0.08 + cellPixels / 180));
+  // Keep the opening proportional at every zoom level. The previous 2.3px
+  // cap made zoomed-in beads look solid even though a small dot was present.
+  const holeRadius = Math.max(0.32, radius * 0.43);
+  const innerWallRadius = holeRadius * 1.18;
+  context.fillStyle = colorString(dark, Math.min(0.82, 0.46 + cellPixels / 90));
+  context.beginPath();
+  context.arc(centerX, centerY + radius * 0.025, innerWallRadius, 0, Math.PI * 2);
+  context.fill();
+
+  // The center matches the board, so every occupied cell reads as a real
+  // cylindrical bead with an open hole while exported PNGs remain opaque.
+  context.fillStyle = BEAD_BOARD_COLOR;
+  context.beginPath();
+  context.arc(centerX, centerY, holeRadius, 0, Math.PI * 2);
+  context.fill();
+
+  if (cellPixels >= 5) {
+    context.strokeStyle = colorString(light, 0.58);
+    context.lineWidth = Math.max(0.4, cellPixels * 0.038);
     context.beginPath();
-    context.arc(centerX, centerY + radius * 0.02, holeRadius, 0, Math.PI * 2);
-    context.fill();
-    context.strokeStyle = colorString(light, 0.18);
-    context.lineWidth = Math.max(0.35, cellPixels * 0.035);
+    context.arc(centerX - holeRadius * 0.03, centerY - holeRadius * 0.04, holeRadius * 1.05, Math.PI * 1.04, Math.PI * 1.76);
+    context.stroke();
+
+    context.strokeStyle = colorString({ r: 0, g: 0, b: 0 }, 0.38);
+    context.lineWidth = Math.max(0.32, cellPixels * 0.032);
     context.beginPath();
-    context.arc(centerX - holeRadius * 0.12, centerY - holeRadius * 0.12, holeRadius * 0.78, Math.PI * 1.05, Math.PI * 1.78);
+    context.arc(centerX + holeRadius * 0.03, centerY + holeRadius * 0.05, holeRadius * 1.04, Math.PI * 0.04, Math.PI * 0.78);
     context.stroke();
   }
   context.restore();
@@ -262,7 +283,7 @@ export function drawPatternVisual(context: PatternDrawingContext, options: DrawP
   context.imageSmoothingEnabled = visualMode !== 'grid';
   context.textAlign = 'center';
   context.textBaseline = 'middle';
-  context.fillStyle = visualMode === 'grid' ? '#FFFFFF' : '#E8E3DA';
+  context.fillStyle = visualMode === 'grid' ? '#FFFFFF' : visualMode === 'beads' ? BEAD_BOARD_COLOR : '#E8E3DA';
   context.fillRect(0, 0, hasAxes ? right + left : right, hasAxes ? bottom + top : bottom);
 
   for (let localRow = 0; localRow < rows; localRow += 1) {
