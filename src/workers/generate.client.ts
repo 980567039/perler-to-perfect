@@ -3,6 +3,7 @@ import type {
   GenerationSettings,
   PaletteManifest,
   PatternResult,
+  SubjectHints,
 } from '../domain/types';
 
 export interface GenerationTask {
@@ -15,6 +16,7 @@ export function startGeneration(
   palette: PaletteManifest,
   settings: GenerationSettings,
   onProgress: (message: Extract<GenerateResponse, { type: 'PROGRESS' }>) => void,
+  subjectHints?: SubjectHints,
 ): GenerationTask {
   const worker = new Worker(new URL('./generate.worker.ts', import.meta.url), { type: 'module' });
   const jobId = crypto.randomUUID();
@@ -59,7 +61,7 @@ export function startGeneration(
       rejectTask = null;
       reject(new Error(event.message || '生成 Worker 发生错误。'));
     };
-    worker.postMessage({ type: 'GENERATE', jobId, bitmap, palette, settings }, [bitmap]);
+    worker.postMessage({ type: 'GENERATE', jobId, bitmap, palette, settings, subjectHints }, [bitmap]);
   });
 
   return {

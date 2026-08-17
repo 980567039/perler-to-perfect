@@ -33,6 +33,7 @@ const settingsSchema = z.object({
   sourceMode: z.enum(['original', 'bead-source']).optional().default('original'),
   renderProfile: z.enum(['shape', 'balanced', 'detail']).optional().default('balanced'),
   structureStrength: z.number().min(0).max(1).optional().default(0.6),
+  subjectEnhancement: z.enum(['local', 'openai-hints']).optional().default('local'),
 });
 
 const sourceSchema = z.object({

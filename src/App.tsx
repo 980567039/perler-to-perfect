@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { CropPreview } from './components/CropPreview';
+import { EditorIcon, type EditorIconName } from './components/EditorIcon';
 import { PatternCanvas, type EditorTool } from './components/PatternCanvas';
 import { PalettePanel } from './components/PalettePanel';
+import { QuickPalette } from './components/QuickPalette';
 import {
   ALGORITHM_VERSION,
   MAX_SOURCE_BYTES,
   MAX_SOURCE_PIXELS,
   type GenerateResponse,
   type PatternVisualMode,
+  type SubjectHints,
 } from './domain/types';
 import { MARD_STANDARD_221_PALETTE } from './domain/mardPalette';
 import { paletteFromFileContents } from './domain/palette';
@@ -24,6 +27,7 @@ import { useProjectStore } from './state/projectStore';
 import { startGeneration, type GenerationTask } from './workers/generate.client';
 import { exportPattern } from './workers/export.client';
 import { RedinkBridge, type RedinkImportPayload } from './integrations/redinkBridge';
+import { createSubjectHintImage, requestSubjectHints } from './integrations/subjectHints';
 
 const stageLabels: Record<Extract<GenerateResponse, { type: 'PROGRESS' }>['stage'], string> = {
   prepare: '准备图像',
@@ -32,6 +36,21 @@ const stageLabels: Record<Extract<GenerateResponse, { type: 'PROGRESS' }>['stage
   map: '映射拼豆色号',
   cleanup: '清理小杂色',
 };
+
+const editorTools: ReadonlyArray<{ value: EditorTool; label: string; icon: EditorIconName }> = [
+  { value: 'paint', label: '画笔', icon: 'paint' },
+  { value: 'eyedropper', label: '吸色', icon: 'eyedropper' },
+  { value: 'wand', label: '魔棒', icon: 'wand' },
+  { value: 'lasso', label: '圈选', icon: 'lasso' },
+  { value: 'erase', label: '橡皮', icon: 'erase' },
+  { value: 'pan', label: '平移', icon: 'pan' },
+];
+
+const visualModes: ReadonlyArray<{ value: PatternVisualMode; label: string; icon: EditorIconName }> = [
+  { value: 'beads', label: '拼豆实物', icon: 'beads' },
+  { value: 'grid', label: '方格图纸', icon: 'grid' },
+  { value: 'ironed', label: '熨烫成品', icon: 'ironed' },
+];
 
 function downloadBlob(blob: Blob, fileName: string): void {
   const url = URL.createObjectURL(blob);
@@ -180,6 +199,17 @@ export function App() {
     setError(null);
     setIsGenerating(true);
     try {
+      let subjectHints: SubjectHints | undefined;
+      if (store.settings.subjectEnhancement === 'openai-hints') {
+        setGenerationProgress({ label: '主体增强', completed: 0, total: 1 });
+        try {
+          const hintImage = await createSubjectHintImage(sourceBlob, store.settings);
+          subjectHints = await requestSubjectHints(hintImage);
+          setNotice('主体增强提示已返回，正在由本地 MARD 算法生成图纸。');
+        } catch (reason) {
+          setNotice(reason instanceof Error ? `${reason.message} 已回退本地生成。` : '主体增强不可用，已回退本地生成。');
+        }
+      }
       const bitmap = await createImageBitmap(sourceBlob, { imageOrientation: 'from-image' });
       const task = startGeneration(bitmap, store.palette, store.settings, (message) => {
         setGenerationProgress({
@@ -187,7 +217,7 @@ export function App() {
           completed: message.completed,
           total: Math.max(1, message.total),
         });
-      });
+      }, subjectHints);
       generationTask.current = task;
       const result = await task.promise;
       store.setPattern(result);
@@ -278,6 +308,15 @@ export function App() {
     }
     updateSetting({ lockedColorIds });
     setError(null);
+  };
+
+  const handlePaletteSelect = (paletteIndex: number) => {
+    const color = store.palette.colors[paletteIndex];
+    if (!color) return;
+    setSelectedPaletteIndex(paletteIndex);
+    setTool('paint');
+    setError(null);
+    setNotice(`画笔颜色已切换为 ${color.code}${color.name ? ` · ${color.name}` : ''}。`);
   };
 
   const handlePickColor = (paletteIndex: number | null) => {
@@ -415,7 +454,7 @@ export function App() {
           <h1>生产级拼豆图纸工作台</h1>
         </div>
         <div className="topbar-status">
-          <span className="privacy-dot" /> 本地计算 · 图片不上传
+          <span className="privacy-dot" /> {store.settings.subjectEnhancement === 'openai-hints' ? '本地生成 · 主体增强可选上传' : '本地计算 · 图片不上传'}
         </div>
       </header>
 
@@ -531,6 +570,17 @@ export function App() {
                 <small>加强轮廓和高对比细节；低对比杂点仍会清理</small>
               </span>
             </label>
+            <label className={`detail-priority-toggle ${store.settings.subjectEnhancement === 'openai-hints' ? 'active' : ''}`}>
+              <input
+                type="checkbox"
+                checked={store.settings.subjectEnhancement === 'openai-hints'}
+                onChange={(event) => updateSetting({ subjectEnhancement: event.target.checked ? 'openai-hints' : 'local' })}
+              />
+              <span>
+                <strong>主体增强（可选云端）</strong>
+                <small>默认关闭；开启后只上传当前取景，失败自动回退本地算法</small>
+              </span>
+            </label>
             <label className="field-stack">
               实际用色上限：{store.settings.maxUsedColors}（有收益才增加）
               <input
@@ -606,44 +656,8 @@ export function App() {
 
         <section className="stage-panel panel">
           <div className="stage-toolbar">
-            <div className="tool-group" aria-label="编辑工具">
-              {(
-                [
-                  ['paint', '画笔'],
-                  ['eyedropper', '吸色'],
-                  ['wand', '魔棒'],
-                  ['lasso', '圈选'],
-                  ['erase', '橡皮'],
-                  ['pan', '平移'],
-                ] as const
-              ).map(([value, label]) => (
-                <button
-                  type="button"
-                  className={tool === value ? 'active' : ''}
-                  disabled={!store.cells}
-                  key={value}
-                  onClick={() => setTool(value)}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-            <div className="tool-group">
-              <button type="button" disabled={store.history.length === 0} onClick={store.undo}>
-                撤销
-              </button>
-              <button type="button" disabled={store.future.length === 0} onClick={store.redo}>
-                重做
-              </button>
-            </div>
             <div className="tool-group visual-mode-group" aria-label="显示模式">
-              {(
-                [
-                  ['beads', '拼豆实物'],
-                  ['grid', '方格图纸'],
-                  ['ironed', '熨烫成品'],
-                ] as const
-              ).map(([value, label]) => (
+              {visualModes.map(({ value, label, icon }) => (
                 <button
                   type="button"
                   className={visualMode === value ? 'active' : ''}
@@ -652,10 +666,46 @@ export function App() {
                   key={value}
                   onClick={() => setVisualMode(value)}
                 >
-                  {label}
+                  <EditorIcon name={icon} />
+                  <span>{label}</span>
                 </button>
               ))}
             </div>
+            <span className="toolbar-divider" aria-hidden="true" />
+            <div className="tool-group editor-tool-group" aria-label="编辑工具">
+              {editorTools.map(({ value, label, icon }) => (
+                <button
+                  type="button"
+                  className={tool === value ? 'active' : ''}
+                  disabled={!store.cells}
+                  key={value}
+                  title={label}
+                  aria-label={label}
+                  aria-pressed={tool === value}
+                  onClick={() => setTool(value)}
+                >
+                  <EditorIcon name={icon} />
+                  <span>{label}</span>
+                </button>
+              ))}
+            </div>
+            <div className="tool-group history-tool-group" aria-label="编辑历史">
+              <button type="button" disabled={store.history.length === 0} title="撤销" aria-label="撤销" onClick={store.undo}>
+                <EditorIcon name="undo" />
+                <span>撤销</span>
+              </button>
+              <button type="button" disabled={store.future.length === 0} title="重做" aria-label="重做" onClick={store.redo}>
+                <EditorIcon name="redo" />
+                <span>重做</span>
+              </button>
+            </div>
+            <QuickPalette
+              palette={store.palette}
+              counts={store.counts}
+              selectedPaletteIndex={selectedPaletteIndex}
+              onSelectColor={handlePaletteSelect}
+            />
+            <span className="toolbar-spacer" />
             <label className="grid-overlay-toggle">
               <input
                 type="checkbox"
@@ -663,6 +713,7 @@ export function App() {
                 disabled={visualMode === 'grid'}
                 onChange={(event) => setShowGridOverlay(event.target.checked)}
               />
+              <EditorIcon name="grid" size={13} />
               定位网格
             </label>
             <div className="stage-summary">
@@ -749,16 +800,22 @@ export function App() {
                 <em>{usedPaletteIndices.has(selectedPaletteIndex) ? '图中使用' : '可选色'}</em>
               </div>
             ) : null}
-            <PalettePanel
-              palette={store.palette}
-              enabledColorIds={store.settings.enabledColorIds}
-              lockedColorIds={store.settings.lockedColorIds}
-              selectedPaletteIndex={selectedPaletteIndex}
-              counts={store.counts}
-              onSelect={setSelectedPaletteIndex}
-              onToggleEnabled={toggleEnabledColor}
-              onToggleLocked={toggleLockedColor}
-            />
+            <details className="palette-management">
+              <summary>
+                <span>色板管理</span>
+                <small>{enabledSet.size} 启用 · {store.palette.colors.length} 色</small>
+              </summary>
+              <PalettePanel
+                palette={store.palette}
+                enabledColorIds={store.settings.enabledColorIds}
+                lockedColorIds={store.settings.lockedColorIds}
+                selectedPaletteIndex={selectedPaletteIndex}
+                counts={store.counts}
+                onSelect={handlePaletteSelect}
+                onToggleEnabled={toggleEnabledColor}
+                onToggleLocked={toggleLockedColor}
+              />
+            </details>
             <div className="palette-footer">
               <span>启用 {enabledSet.size}</span>
               <span>使用 {store.counts.length}</span>

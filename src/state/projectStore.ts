@@ -242,6 +242,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       fit: 'crop' as const,
       detailPriority: project.settings.detailPriority ?? true,
       minimumPaletteDistance: project.settings.minimumPaletteDistance ?? 4,
+      subjectEnhancement: project.settings.subjectEnhancement ?? 'local',
     };
     const cells = decodeCellsRle(project.cellsRle, settings.grid.columns * settings.grid.rows);
     const { counts, totalBeads } = countCells(cells, settings.grid, project.palette);

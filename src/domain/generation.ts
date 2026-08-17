@@ -9,9 +9,13 @@ import {
   type PaletteManifest,
   type PatternResult,
   type RgbColor,
+  type SubjectHints,
 } from './types';
 
-const SAMPLE_SCALE = 4;
+// Eight samples per bead cell gives thin outlines and facial details enough
+// coverage to survive the representative-color decision without making the
+// 300×300 worker canvas unreasonably large.
+const SAMPLE_SCALE = 8;
 const MIN_MEAN_PALETTE_GAIN = 0.1;
 const CLOSE_COLOR_REGIONAL_SUPPORT = 0.08;
 const CLOSE_COLOR_MIN_MEAN_GAIN = 0.25;
@@ -28,6 +32,7 @@ interface RepresentativeCell {
   lab: LabColor;
   detailWeight: number;
   edgeStrength: number;
+  sourceEdgeStrength: number;
 }
 
 interface HistogramBucket {
@@ -66,6 +71,8 @@ function representativeForCell(
   let visibleSamples = 0;
   let minimumLuminance = 255;
   let maximumLuminance = 0;
+  let edgeDifferenceTotal = 0;
+  let edgeDifferenceSamples = 0;
   const startX = cellColumn * SAMPLE_SCALE;
   const startY = cellRow * SAMPLE_SCALE;
   for (let y = startY; y < startY + SAMPLE_SCALE; y += 1) {
@@ -88,6 +95,30 @@ function representativeForCell(
       const luminance = rgb.r * 0.2126 + rgb.g * 0.7152 + rgb.b * 0.0722;
       minimumLuminance = Math.min(minimumLuminance, luminance);
       maximumLuminance = Math.max(maximumLuminance, luminance);
+      if (x > startX) {
+        const previousOffset = (y * imageWidth + x - 1) * 4;
+        const previousAlpha = pixels[previousOffset + 3] ?? 0;
+        if (previousAlpha >= 128) {
+          edgeDifferenceTotal += Math.hypot(
+            rgb.r - (pixels[previousOffset] ?? 0),
+            rgb.g - (pixels[previousOffset + 1] ?? 0),
+            rgb.b - (pixels[previousOffset + 2] ?? 0),
+          );
+          edgeDifferenceSamples += 1;
+        }
+      }
+      if (y > startY) {
+        const previousOffset = ((y - 1) * imageWidth + x) * 4;
+        const previousAlpha = pixels[previousOffset + 3] ?? 0;
+        if (previousAlpha >= 128) {
+          edgeDifferenceTotal += Math.hypot(
+            rgb.r - (pixels[previousOffset] ?? 0),
+            rgb.g - (pixels[previousOffset + 1] ?? 0),
+            rgb.b - (pixels[previousOffset + 2] ?? 0),
+          );
+          edgeDifferenceSamples += 1;
+        }
+      }
       visibleSamples += 1;
     }
   }
@@ -108,7 +139,13 @@ function representativeForCell(
       g: winning.g / winning.count,
       b: winning.b / winning.count,
     };
-    const minimumCoverage = Math.max(2, Math.ceil(visibleSamples * 0.2));
+    const sourceEdgeStrength = edgeDifferenceSamples > 0
+      ? Math.min(100, (edgeDifferenceTotal / edgeDifferenceSamples) / 4.41)
+      : 0;
+    const minimumCoverage = Math.max(
+      2,
+      Math.ceil(visibleSamples * (sourceEdgeStrength >= 20 ? 0.125 : 0.2)),
+    );
     let winningScore = winning.count;
     for (const [key, value] of buckets) {
       if (key === winningKey || value.count < minimumCoverage) continue;
@@ -123,7 +160,12 @@ function representativeForCell(
         candidateRgb.b - dominantRgb.b,
       );
       const contrast = Math.min(1, distance / Math.sqrt(3 * 255 * 255));
-      const score = value.count + contrast * 9;
+      // Scale the contrast bonus with sample count. A 25%-coverage eye or
+      // outline is four pixels at 4× but sixteen pixels at 8×; a fixed bonus
+      // would incorrectly favour the dominant background at the higher
+      // quality sample scale.
+      const contrastBoost = Math.max(9, visibleSamples * (sourceEdgeStrength >= 20 ? 0.72 : 0.56));
+      const score = value.count + contrast * contrastBoost;
       if (score > winningScore + 1e-6 || (Math.abs(score - winningScore) <= 1e-6 && key < winningKey)) {
         winningKey = key;
         winning = value;
@@ -137,8 +179,20 @@ function representativeForCell(
     g: Math.round(winning.g / winning.count),
     b: Math.round(winning.b / winning.count),
   };
-  const detailWeight = detailPriority ? 1 + Math.min(2, (maximumLuminance - minimumLuminance) / 128) : 1;
-  return { bucketKey: colorBucketKey(rgb), rgb, lab: rgbToLab(rgb), detailWeight, edgeStrength: 0 };
+  const sourceEdgeStrength = edgeDifferenceSamples > 0
+    ? Math.min(100, (edgeDifferenceTotal / edgeDifferenceSamples) / 4.41)
+    : 0;
+  const detailWeight = detailPriority
+    ? 1 + Math.min(2, (maximumLuminance - minimumLuminance) / 128) + Math.min(1, sourceEdgeStrength / 50)
+    : 1;
+  return {
+    bucketKey: colorBucketKey(rgb),
+    rgb,
+    lab: rgbToLab(rgb),
+    detailWeight,
+    edgeStrength: 0,
+    sourceEdgeStrength,
+  };
 }
 
 function annotateEdgeStrength(representatives: Array<RepresentativeCell | null>, grid: GridSize): void {
@@ -162,6 +216,35 @@ function annotateEdgeStrength(representatives: Array<RepresentativeCell | null>,
       edgeStrength = Math.max(edgeStrength, deltaE2000(representative.lab, neighbor.lab));
     }
     representative.edgeStrength = edgeStrength;
+  }
+}
+
+function applySubjectHints(
+  representatives: Array<RepresentativeCell | null>,
+  grid: GridSize,
+  hints: SubjectHints | undefined,
+): void {
+  if (!hints || hints.confidence < 0.55) return;
+  const marginX = Math.max(0.025, 2 / Math.max(1, grid.columns));
+  const marginY = Math.max(0.025, 2 / Math.max(1, grid.rows));
+  const left = Math.max(0, hints.bbox.x - marginX);
+  const top = Math.max(0, hints.bbox.y - marginY);
+  const right = Math.min(1, hints.bbox.x + hints.bbox.width + marginX);
+  const bottom = Math.min(1, hints.bbox.y + hints.bbox.height + marginY);
+
+  for (let index = 0; index < representatives.length; index += 1) {
+    const representative = representatives[index];
+    if (!representative) continue;
+    const row = Math.floor(index / grid.columns);
+    const column = index % grid.columns;
+    const x = (column + 0.5) / grid.columns;
+    const y = (row + 0.5) / grid.rows;
+    const focus = hints.focusRegions.find((region) => Math.hypot(region.x - x, region.y - y) <= region.radius);
+    if (focus) {
+      representative.detailWeight += 1 + focus.confidence;
+      continue;
+    }
+    if (x < left || x > right || y < top || y > bottom) representatives[index] = null;
   }
 }
 
@@ -493,6 +576,7 @@ export function generatePattern(
   options: {
     onProgress?: (progress: GenerationProgress) => void;
     isCancelled?: () => boolean;
+    subjectHints?: SubjectHints;
   } = {},
 ): PatternResult {
   const enabledIndices = validateGenerationSettings(settings, palette);
@@ -523,6 +607,7 @@ export function generatePattern(
     );
   }
   options.onProgress?.({ stage: 'sample', completed: cellCount, total: cellCount });
+  applySubjectHints(representatives, settings.grid, options.subjectHints);
   annotateEdgeStrength(representatives, settings.grid);
 
   const { buckets, bucketIndexByKey } = buildHistogram(representatives);

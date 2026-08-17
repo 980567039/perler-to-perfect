@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { hexToRgb } from './color';
-import { generatePattern } from './generation';
+import { GENERATION_SAMPLE_SCALE, generatePattern } from './generation';
 import type { GenerationSettings, PaletteManifest } from './types';
 
 const twoColorPalette: PaletteManifest = {
@@ -31,28 +31,29 @@ const adaptivePalette: PaletteManifest = {
 };
 
 function solidSample(red: number, green: number, blue: number, alpha = 255): ImageData {
-  const data = new Uint8ClampedArray(4 * 4 * 4);
-  for (let index = 0; index < 16; index += 1) {
+  const samplePixels = GENERATION_SAMPLE_SCALE * GENERATION_SAMPLE_SCALE;
+  const data = new Uint8ClampedArray(samplePixels * 4);
+  for (let index = 0; index < samplePixels; index += 1) {
     data[index * 4] = red;
     data[index * 4 + 1] = green;
     data[index * 4 + 2] = blue;
     data[index * 4 + 3] = alpha;
   }
-  return { data, width: 4, height: 4, colorSpace: 'srgb' } as ImageData;
+  return { data, width: GENERATION_SAMPLE_SCALE, height: GENERATION_SAMPLE_SCALE, colorSpace: 'srgb' } as ImageData;
 }
 
 function gridSample(columns: number, rows: number, colors: string[]): ImageData {
   if (colors.length !== columns * rows) throw new Error('test grid color count mismatch');
-  const width = columns * 4;
-  const height = rows * 4;
+  const width = columns * GENERATION_SAMPLE_SCALE;
+  const height = rows * GENERATION_SAMPLE_SCALE;
   const data = new Uint8ClampedArray(width * height * 4);
   colors.forEach((hex, cellIndex) => {
     const rgb = hexToRgb(hex);
     const cellRow = Math.floor(cellIndex / columns);
     const cellColumn = cellIndex % columns;
-    for (let y = 0; y < 4; y += 1) {
-      for (let x = 0; x < 4; x += 1) {
-        const offset = ((cellRow * 4 + y) * width + cellColumn * 4 + x) * 4;
+    for (let y = 0; y < GENERATION_SAMPLE_SCALE; y += 1) {
+      for (let x = 0; x < GENERATION_SAMPLE_SCALE; x += 1) {
+        const offset = ((cellRow * GENERATION_SAMPLE_SCALE + y) * width + cellColumn * GENERATION_SAMPLE_SCALE + x) * 4;
         data[offset] = rgb.r;
         data[offset + 1] = rgb.g;
         data[offset + 2] = rgb.b;
@@ -118,8 +119,8 @@ describe('pattern generation', () => {
   it('generates the maximum 300×300 grid with a strict palette index per cell', () => {
     const columns = 300;
     const rows = 300;
-    const width = columns * 4;
-    const height = rows * 4;
+    const width = columns * GENERATION_SAMPLE_SCALE;
+    const height = rows * GENERATION_SAMPLE_SCALE;
     const data = new Uint8ClampedArray(width * height * 4);
     for (let index = 3; index < data.length; index += 4) data[index] = 255;
 
@@ -147,15 +148,16 @@ describe('pattern generation', () => {
   });
 
   it('preserves a high-contrast feature that covers one quarter of a cell in detail-priority mode', () => {
-    const data = new Uint8ClampedArray(4 * 4 * 4);
-    for (let index = 0; index < 16; index += 1) {
-      const value = index < 4 ? 0 : 255;
+    const data = new Uint8ClampedArray(GENERATION_SAMPLE_SCALE * GENERATION_SAMPLE_SCALE * 4);
+    const featurePixels = GENERATION_SAMPLE_SCALE * (GENERATION_SAMPLE_SCALE / 4);
+    for (let index = 0; index < GENERATION_SAMPLE_SCALE * GENERATION_SAMPLE_SCALE; index += 1) {
+      const value = index < featurePixels ? 0 : 255;
       data[index * 4] = value;
       data[index * 4 + 1] = value;
       data[index * 4 + 2] = value;
       data[index * 4 + 3] = 255;
     }
-    const sampledImage = { data, width: 4, height: 4, colorSpace: 'srgb' } as ImageData;
+    const sampledImage = { data, width: GENERATION_SAMPLE_SCALE, height: GENERATION_SAMPLE_SCALE, colorSpace: 'srgb' } as ImageData;
     const baseSettings = {
       grid: { columns: 1, rows: 1 },
       fit: 'contain' as const,

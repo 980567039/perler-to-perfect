@@ -12,6 +12,24 @@ export interface GridSize {
 
 export type PatternVisualMode = 'beads' | 'grid' | 'ironed';
 
+export type SubjectEnhancementMode = 'local' | 'openai-hints';
+
+export interface SubjectFocusRegion {
+  x: number;
+  y: number;
+  radius: number;
+  kind: 'face' | 'eye' | 'outline' | 'accessory';
+  confidence: number;
+}
+
+/** Normalized, model-assisted hints. The local generator remains authoritative. */
+export interface SubjectHints {
+  bbox: { x: number; y: number; width: number; height: number };
+  foregroundSeeds: Array<{ x: number; y: number; kind: 'inside' | 'outside' }>;
+  focusRegions: SubjectFocusRegion[];
+  confidence: number;
+}
+
 export interface RgbColor {
   r: number;
   g: number;
@@ -89,6 +107,8 @@ export interface GenerationSettings {
   renderProfile?: 'shape' | 'balanced' | 'detail';
   /** 0–1 region-consistency strength. Omitted values preserve V1 projects. */
   structureStrength?: number;
+  /** Optional cloud-assisted subject hints; defaults to local-only processing. */
+  subjectEnhancement?: SubjectEnhancementMode;
 }
 
 export type CellReason = 'flat' | 'edge' | 'detail' | 'noise';
@@ -150,6 +170,7 @@ export interface GeneratePayload {
   bitmap: ImageBitmap;
   palette: PaletteManifest;
   settings: GenerationSettings;
+  subjectHints?: SubjectHints;
 }
 
 export interface CancelPayload {
@@ -200,5 +221,6 @@ export function createDefaultSettings(palette: PaletteManifest): GenerationSetti
     sourceMode: 'original',
     renderProfile: 'balanced',
     structureStrength: 0.6,
+    subjectEnhancement: 'local',
   };
 }

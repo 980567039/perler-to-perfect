@@ -86,6 +86,7 @@ workerScope.onmessage = (event: MessageEvent<GenerateRequest>) => {
     const result = generatePattern(sampledImage, palette, settings, {
       isCancelled: () => cancelledJobs.has(jobId),
       onProgress: (progress) => post({ type: 'PROGRESS', jobId, ...progress }),
+      subjectHints: request.subjectHints,
     });
     const cellsBuffer = result.cells.buffer as ArrayBuffer;
     const confidenceBuffer = result.diagnostics?.confidence.buffer as ArrayBuffer | undefined;

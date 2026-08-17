@@ -105,7 +105,9 @@ export function PatternCanvas({
     if (!context) return;
     context.setTransform(ratio, 0, 0, ratio, 0, 0);
     context.clearRect(0, 0, size.width, size.height);
-    context.fillStyle = '#ECE8E1';
+    // Keep the viewport margin in the same deep charcoal family as the editor.
+    // Grid mode still paints its own white production sheet inside the renderer.
+    context.fillStyle = '#0F1318';
     context.fillRect(0, 0, size.width, size.height);
 
     const { scale, offsetX, offsetY } = viewport;

@@ -5,6 +5,7 @@ export interface StructuralRepresentative {
   lab: LabColor;
   edgeStrength: number;
   detailWeight: number;
+  sourceEdgeStrength?: number;
 }
 
 const NEIGHBORS = [
@@ -49,7 +50,7 @@ export function regularizeStructure(
       // A modest tone step can still be an anti-aliased texture.  Preserve
       // genuinely strong contours, but allow low-contrast accents to be
       // regularized even when their neighbouring cells are uniform.
-      if (representative.edgeStrength >= 14) continue;
+      if (representative.edgeStrength >= 14 || (representative.sourceEdgeStrength ?? 0) >= 28) continue;
       const row = Math.floor(index / columns);
       const column = index % columns;
       const neighborCounts = new Map<number, number>();
@@ -127,7 +128,7 @@ export function buildPatternDiagnostics(
     if (changed[index] === 1) {
       reasons[index] = 'noise';
       noisy += 1;
-    } else if (representative.edgeStrength >= 12) {
+    } else if (representative.edgeStrength >= 12 || (representative.sourceEdgeStrength ?? 0) >= 28) {
       reasons[index] = 'edge';
     } else if (representative.detailWeight > 1.5) {
       reasons[index] = 'detail';
