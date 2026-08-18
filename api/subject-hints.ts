@@ -5,7 +5,7 @@ import {
   type SubjectHints,
   type SubjectHintsApiResponse,
   type SubjectHintsRequestBody,
-} from '../src/integrations/subjectHints.types';
+} from '../src/integrations/subjectHints.types.js';
 
 interface SubjectHintsApiRequest {
   method?: string;
