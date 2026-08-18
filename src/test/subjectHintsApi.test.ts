@@ -1,25 +1,20 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import handler from './subject-hints';
+import handler from '../../api/subject-hints';
 
 interface TestResponse {
   statusCode?: number;
   payload?: unknown;
-  status: ReturnType<typeof vi.fn>;
-  json: ReturnType<typeof vi.fn>;
+  status(code: number): TestResponse;
+  json(payload: unknown): void;
 }
 
 function createResponse(): TestResponse {
-  const result = {
-    statusCode: undefined,
-    payload: undefined,
-    status: vi.fn(),
-    json: vi.fn(),
-  } as TestResponse;
-  result.status.mockImplementation((statusCode: number) => {
+  const result = {} as TestResponse;
+  result.status = vi.fn((statusCode: number) => {
     result.statusCode = statusCode;
     return result;
   });
-  result.json.mockImplementation((payload: unknown) => {
+  result.json = vi.fn((payload: unknown) => {
     result.payload = payload;
   });
   return result;
@@ -130,4 +125,3 @@ describe('subject hints Vercel function', () => {
     expect(JSON.stringify(response.payload)).not.toContain(request.body.image);
   });
 });
-
