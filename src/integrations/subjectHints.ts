@@ -165,7 +165,7 @@ export async function createSubjectHintImage(
   const canvas = typeof OffscreenCanvas !== 'undefined'
     ? new OffscreenCanvas(width, height)
     : Object.assign(document.createElement('canvas'), { width, height });
-  const context = canvas.getContext('2d');
+  const context = canvas.getContext('2d') as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
   if (!context) {
     bitmap.close();
     throw new Error('无法创建主体增强预览。');

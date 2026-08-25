@@ -4,8 +4,6 @@ import { ALGORITHM_VERSION } from './domain/types';
 import {
   createAutoGenerationSettings,
   decodeAutoSource,
-  refineAutoPattern,
-  removeAutoBorderBackground,
 } from './integrations/autoPattern';
 import { RedinkAutoBridge, type RedinkAutoGeneratePayload } from './integrations/redinkAutoBridge';
 import { renderAutoPatternPreview } from './rendering/autoPatternPreview';
@@ -47,41 +45,29 @@ export function AutoMode() {
         const generated = await task.promise;
         generationTask.current = null;
 
-        bridge.sendProgress('background', 0, 1);
-        const backgroundRemoved = removeAutoBorderBackground(generated);
-        bridge.sendProgress('background', 1, 1);
-
-        setStatus('正在精细化图纸…');
-        bridge.sendProgress('refine', 0, 1);
-        const result = refineAutoPattern(
-          backgroundRemoved,
-          payload.settings.maxUsedColors,
-          payload.settings.profile ?? 'balanced',
-        );
-        bridge.sendProgress('refine', 1, 1);
-        if (result.counts.length === 0) {
-          throw new Error('背景移除后没有可用拼豆格，请进入 Perler 工作台手动调整。');
+        if (generated.counts.length === 0) {
+          throw new Error('mvp 生成后没有可用拼豆格，请进入 Perler 工作台手动调整。');
         }
 
         setStatus('正在渲染效果图和母版…');
         bridge.sendProgress('render', 0, 2);
         const preview = await renderAutoPatternPreview({
-          grid: result.grid,
-          cells: result.cells,
+          grid: generated.grid,
+          cells: generated.cells,
           palette: MARD_STANDARD_221_PALETTE,
         });
         bridge.sendProgress('render', 1, 2);
         const master = await exportMasterPattern({
-          grid: result.grid,
-          cells: result.cells,
+          grid: generated.grid,
+          cells: generated.cells,
           palette: MARD_STANDARD_221_PALETTE,
           watermarkEnabled: true,
         });
         bridge.sendProgress('render', 2, 2);
         await bridge.sendPattern(master, preview, {
-          columns: result.grid.columns,
-          rows: result.grid.rows,
-          usedColors: result.counts.length,
+          columns: generated.grid.columns,
+          rows: generated.grid.rows,
+          usedColors: generated.counts.length,
           profile: payload.settings.profile ?? 'detail',
           algorithmVersion: ALGORITHM_VERSION,
           sourceKind: payload.settings.sourceKind ?? 'original',

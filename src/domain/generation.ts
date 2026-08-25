@@ -16,6 +16,10 @@ import {
 // coverage to survive the representative-color decision without making the
 // 300×300 worker canvas unreasonably large.
 const SAMPLE_SCALE = 8;
+// Perfect Pixel returns one alpha coverage value per cell. 18% matches the
+// mvp coverage threshold and keeps thin outlines from disappearing when the
+// sampled cell is expanded back to the Worker raster.
+const MIN_VISIBLE_ALPHA = 46;
 const MIN_MEAN_PALETTE_GAIN = 0.1;
 const CLOSE_COLOR_REGIONAL_SUPPORT = 0.08;
 const CLOSE_COLOR_MIN_MEAN_GAIN = 0.25;
@@ -79,7 +83,7 @@ function representativeForCell(
     for (let x = startX; x < startX + SAMPLE_SCALE; x += 1) {
       const offset = (y * imageWidth + x) * 4;
       const alpha = pixels[offset + 3] ?? 0;
-      if (alpha < 128) continue;
+      if (alpha < MIN_VISIBLE_ALPHA) continue;
       const rgb = {
         r: pixels[offset] ?? 0,
         g: pixels[offset + 1] ?? 0,
@@ -275,7 +279,6 @@ function validateGenerationSettings(settings: GenerationSettings, palette: Palet
 
 function buildHistogram(representatives: Array<RepresentativeCell | null>): {
   buckets: HistogramBucket[];
-  bucketIndexByKey: Map<number, number>;
 } {
   const raw = new Map<number, { r: number; g: number; b: number; count: number; weight: number; edgeWeight: number }>();
   for (const representative of representatives) {
@@ -302,7 +305,7 @@ function buildHistogram(representatives: Array<RepresentativeCell | null>): {
       };
       return { key, rgb, lab: rgbToLab(rgb), weight: value.weight, edgeWeight: value.edgeWeight };
     });
-  return { buckets, bucketIndexByKey: new Map(buckets.map((bucket, index) => [bucket.key, index])) };
+  return { buckets };
 }
 
 function buildDistanceMatrix(
@@ -610,7 +613,7 @@ export function generatePattern(
   applySubjectHints(representatives, settings.grid, options.subjectHints);
   annotateEdgeStrength(representatives, settings.grid);
 
-  const { buckets, bucketIndexByKey } = buildHistogram(representatives);
+  const { buckets } = buildHistogram(representatives);
   if (buckets.length === 0) {
     const emptyCells = new Uint16Array(cellCount);
     emptyCells.fill(EMPTY_CELL);
@@ -643,22 +646,6 @@ export function generatePattern(
   );
   options.onProgress?.({ stage: 'select', completed: 2, total: 2 });
 
-  const paletteByBucket = new Uint16Array(buckets.length);
-  for (let bucketIndex = 0; bucketIndex < buckets.length; bucketIndex += 1) {
-    let bestPaletteIndex = EMPTY_CELL;
-    let bestDistance = Number.POSITIVE_INFINITY;
-    for (const enabledPosition of selectedEnabledIndices) {
-      const paletteIndex = enabledIndices[enabledPosition];
-      if (paletteIndex === undefined) continue;
-      const distance = distances[bucketIndex * enabledIndices.length + enabledPosition] ?? Number.POSITIVE_INFINITY;
-      if (distance < bestDistance - 1e-6 || (Math.abs(distance - bestDistance) <= 1e-6 && paletteIndex < bestPaletteIndex)) {
-        bestDistance = distance;
-        bestPaletteIndex = paletteIndex;
-      }
-    }
-    paletteByBucket[bucketIndex] = bestPaletteIndex;
-  }
-
   const mapped = new Uint16Array(cellCount);
   mapped.fill(EMPTY_CELL);
   for (let index = 0; index < representatives.length; index += 1) {
@@ -668,9 +655,26 @@ export function generatePattern(
     }
     const representative = representatives[index];
     if (!representative) continue;
-    const bucketIndex = bucketIndexByKey.get(representative.bucketKey);
-    if (bucketIndex === undefined) continue;
-    mapped[index] = paletteByBucket[bucketIndex] ?? EMPTY_CELL;
+    // Buckets are useful for selecting the limited palette, but must not be
+    // reused for the final mapping. Two real cells can share a 12-bit bucket
+    // while still being closer to different enabled colors (this is common in
+    // skin tones, hair highlights, and low-contrast outlines).
+    let bestPaletteIndex = EMPTY_CELL;
+    let bestDistance = Number.POSITIVE_INFINITY;
+    for (const enabledPosition of selectedEnabledIndices) {
+      const paletteIndex = enabledIndices[enabledPosition];
+      const paletteLab = paletteIndex === undefined ? undefined : paletteLabs[paletteIndex];
+      if (paletteIndex === undefined || !paletteLab) continue;
+      const distance = deltaE2000(representative.lab, paletteLab);
+      if (
+        distance < bestDistance - 1e-6 ||
+        (Math.abs(distance - bestDistance) <= 1e-6 && paletteIndex < bestPaletteIndex)
+      ) {
+        bestDistance = distance;
+        bestPaletteIndex = paletteIndex;
+      }
+    }
+    mapped[index] = bestPaletteIndex;
   }
   options.onProgress?.({ stage: 'map', completed: cellCount, total: cellCount });
 

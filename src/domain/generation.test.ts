@@ -116,6 +116,22 @@ describe('pattern generation', () => {
     expect(result.counts).toEqual([]);
   });
 
+  it('keeps a cell whose sampled alpha represents mvp-level foreground coverage', () => {
+    const result = generatePattern(solidSample(0, 0, 0, 64), twoColorPalette, {
+      grid: { columns: 1, rows: 1 },
+      fit: 'contain',
+      transform: { scale: 1, offsetX: 0, offsetY: 0 },
+      maxUsedColors: 2,
+      minimumPaletteDistance: 0,
+      enabledColorIds: ['test:white', 'test:black'],
+      lockedColorIds: [],
+      cleanupRegionSize: 0,
+      detailPriority: false,
+    });
+    expect(result.cells[0]).toBe(1);
+    expect(result.totalBeads).toBe(1);
+  });
+
   it('generates the maximum 300×300 grid with a strict palette index per cell', () => {
     const columns = 300;
     const rows = 300;
@@ -202,6 +218,24 @@ describe('pattern generation', () => {
     expect(result.counts.map(({ paletteIndex, count }) => [paletteIndex, count])).toEqual([
       [0, 50],
       [1, 50],
+    ]);
+  });
+
+  it('maps nearby colors in the same sampling bucket independently', () => {
+    const result = generatePattern(
+      gridSample(2, 1, ['#808080', '#8F8F8F']),
+      adaptivePalette,
+      adaptiveSettings(2, 1, {
+        maxUsedColors: 2,
+        lockedColorIds: ['test:gray', 'test:near-gray'],
+        detailPriority: false,
+      }),
+    );
+
+    expect([...result.cells]).toEqual([0, 1]);
+    expect(result.counts.map(({ paletteIndex, count }) => [paletteIndex, count])).toEqual([
+      [0, 1],
+      [1, 1],
     ]);
   });
 

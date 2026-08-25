@@ -10,7 +10,6 @@ import {
   MAX_SOURCE_PIXELS,
   type GenerateResponse,
   type PatternVisualMode,
-  type SubjectHints,
 } from './domain/types';
 import { MARD_STANDARD_221_PALETTE } from './domain/mardPalette';
 import { paletteFromFileContents } from './domain/palette';
@@ -27,7 +26,6 @@ import { useProjectStore } from './state/projectStore';
 import { startGeneration, type GenerationTask } from './workers/generate.client';
 import { exportPattern } from './workers/export.client';
 import { RedinkBridge, type RedinkImportPayload } from './integrations/redinkBridge';
-import { createSubjectHintImage, requestSubjectHints } from './integrations/subjectHints';
 
 const stageLabels: Record<Extract<GenerateResponse, { type: 'PROGRESS' }>['stage'], string> = {
   prepare: '准备图像',
@@ -199,17 +197,6 @@ export function App() {
     setError(null);
     setIsGenerating(true);
     try {
-      let subjectHints: SubjectHints | undefined;
-      if (store.settings.subjectEnhancement === 'openai-hints') {
-        setGenerationProgress({ label: '主体增强', completed: 0, total: 1 });
-        try {
-          const hintImage = await createSubjectHintImage(sourceBlob, store.settings);
-          subjectHints = await requestSubjectHints(hintImage);
-          setNotice('主体增强提示已返回，正在由本地 MARD 算法生成图纸。');
-        } catch (reason) {
-          setNotice(reason instanceof Error ? `${reason.message} 已回退本地生成。` : '主体增强不可用，已回退本地生成。');
-        }
-      }
       const bitmap = await createImageBitmap(sourceBlob, { imageOrientation: 'from-image' });
       const task = startGeneration(bitmap, store.palette, store.settings, (message) => {
         setGenerationProgress({
@@ -217,7 +204,8 @@ export function App() {
           completed: message.completed,
           total: Math.max(1, message.total),
         });
-      }, subjectHints);
+        setNotice('正在按 mvp 采样规则生成图纸。');
+      });
       generationTask.current = task;
       const result = await task.promise;
       store.setPattern(result);
@@ -252,7 +240,7 @@ export function App() {
     autoGenerateAfterImport.current = true;
     const settings = payload.settings ?? { columns: 104, rows: 104, maxUsedColors: 40 };
     setNotice(
-      `已从 RedInk 接收拼豆源图，正在按 ${settings.columns}×${settings.rows}、${settings.maxUsedColors} 色、细节优先生成。`,
+      `已从 RedInk 接收拼豆源图，正在按 ${settings.columns}×${settings.rows} 使用 mvp 规则生成。`,
     );
     updateSetting({
       grid: { columns: settings.columns, rows: settings.rows },
@@ -454,7 +442,7 @@ export function App() {
           <h1>生产级拼豆图纸工作台</h1>
         </div>
         <div className="topbar-status">
-          <span className="privacy-dot" /> {store.settings.subjectEnhancement === 'openai-hints' ? '本地生成 · 主体增强可选上传' : '本地计算 · 图片不上传'}
+          <span className="privacy-dot" /> mvp 本地生成 · 图片不上传
         </div>
       </header>
 
@@ -534,89 +522,16 @@ export function App() {
           <section>
             <div className="section-heading">
               <span>02</span>
-              <h2>颜色约束</h2>
+              <h2>mvp 原版生成</h2>
             </div>
             <div className="palette-meta">
               <strong>{store.palette.edition}</strong>
               <span>{store.palette.colors.length} 个可用色号</span>
             </div>
-            <label className="field-stack">
-              成图策略
-              <select
-                value={store.settings.renderProfile ?? 'balanced'}
-                onChange={(event) => {
-                  const renderProfile = event.target.value as 'shape' | 'balanced' | 'detail';
-                  const profileSettings = {
-                    shape: { detailPriority: false, structureStrength: 0.86, cleanupRegionSize: 2 as const },
-                    balanced: { detailPriority: true, structureStrength: 0.6, cleanupRegionSize: 2 as const },
-                    detail: { detailPriority: true, structureStrength: 0.22, cleanupRegionSize: 1 as const },
-                  }[renderProfile];
-                  updateSetting({ renderProfile, ...profileSettings });
-                }}
-              >
-                <option value="shape">轮廓优先（最干净）</option>
-                <option value="balanced">平衡（推荐）</option>
-                <option value="detail">细节优先（保留更多特征）</option>
-              </select>
-            </label>
-            <label className={`detail-priority-toggle ${store.settings.detailPriority ? 'active' : ''}`}>
-              <input
-                type="checkbox"
-                checked={store.settings.detailPriority}
-                onChange={(event) => updateSetting({ detailPriority: event.target.checked })}
-              />
-              <span>
-                <strong>细节优先</strong>
-                <small>加强轮廓和高对比细节；低对比杂点仍会清理</small>
-              </span>
-            </label>
-            <label className={`detail-priority-toggle ${store.settings.subjectEnhancement === 'openai-hints' ? 'active' : ''}`}>
-              <input
-                type="checkbox"
-                checked={store.settings.subjectEnhancement === 'openai-hints'}
-                onChange={(event) => updateSetting({ subjectEnhancement: event.target.checked ? 'openai-hints' : 'local' })}
-              />
-              <span>
-                <strong>主体增强（可选云端）</strong>
-                <small>默认关闭；开启后只上传当前取景，失败自动回退本地算法</small>
-              </span>
-            </label>
-            <label className="field-stack">
-              实际用色上限：{store.settings.maxUsedColors}（有收益才增加）
-              <input
-                type="range"
-                min="2"
-                max={Math.min(64, store.settings.enabledColorIds.length)}
-                value={store.settings.maxUsedColors}
-                onChange={(event) => updateSetting({ maxUsedColors: Number(event.target.value) })}
-              />
-            </label>
-            <label className="field-stack">
-              {store.settings.minimumPaletteDistance === 0
-                ? '相近色合并：关闭'
-                : `相近色合并：ΔE < ${store.settings.minimumPaletteDistance}`}
-              <input
-                type="range"
-                min="0"
-                max="12"
-                step="1"
-                value={store.settings.minimumPaletteDistance}
-                onChange={(event) => updateSetting({ minimumPaletteDistance: Number(event.target.value) })}
-              />
-            </label>
-            <label className="field-stack">
-              低对比杂色清理：≤ {store.settings.cleanupRegionSize} 格
-              <input
-                type="range"
-                min="0"
-                max="4"
-                value={store.settings.cleanupRegionSize}
-                onChange={(event) =>
-                  updateSetting({ cleanupRegionSize: Number(event.target.value) as 0 | 1 | 2 | 3 | 4 })
-                }
-              />
-            </label>
-            <p className="helper">用色数是上限，不会强制用满；相近色若覆盖足够大的真实区域仍可保留。</p>
+            <div className="mvp-engine-card">
+              <strong>原图 → 主体 → 4×4 采样 → 最近色</strong>
+              <span>只保留 mvp 的前景提取、主体比例和 Oklab 最近色映射。生成后可继续使用画笔、吸色、魔棒、圈选、橡皮、平移和撤销重做。</span>
+            </div>
             <label className="secondary-button file-button">
               导入自定义色板
               <input

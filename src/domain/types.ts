@@ -104,7 +104,7 @@ export interface GenerationSettings {
   /** Source generated specifically for gridding, or a general raster image. */
   sourceMode?: 'original' | 'bead-source';
   /** The product-facing trade-off, replacing opaque cleanup-only tuning. */
-  renderProfile?: 'shape' | 'balanced' | 'detail';
+  renderProfile?: 'simple' | 'shape' | 'balanced' | 'detail';
   /** 0–1 region-consistency strength. Omitted values preserve V1 projects. */
   structureStrength?: number;
   /** Optional cloud-assisted subject hints; defaults to local-only processing. */
@@ -167,7 +167,9 @@ export interface PatternProjectV1 {
 export interface GeneratePayload {
   type: 'GENERATE';
   jobId: string;
-  bitmap: ImageBitmap;
+  bitmap?: ImageBitmap;
+  /** A pre-sampled grid image returned by the optional Perfect Pixel service. */
+  sampledImage?: ImageData;
   palette: PaletteManifest;
   settings: GenerationSettings;
   subjectHints?: SubjectHints;
@@ -187,6 +189,7 @@ export type GenerateResponse =
       stage: 'prepare' | 'sample' | 'select' | 'map' | 'cleanup';
       completed: number;
       total: number;
+      engine?: 'perfect-pixel' | 'local-fallback';
     }
   | {
       type: 'RESULT';
@@ -213,14 +216,16 @@ export function createDefaultSettings(palette: PaletteManifest): GenerationSetti
     fit: 'crop',
     transform: { scale: 1, offsetX: 0, offsetY: 0 },
     maxUsedColors: 16,
-    minimumPaletteDistance: 4,
+    // Match mvp's default: sample and map first; do not merge close shades
+    // unless the user explicitly enables the advanced cleanup behavior.
+    minimumPaletteDistance: 0,
     enabledColorIds: palette.colors.map((color) => color.id),
     lockedColorIds: [],
-    cleanupRegionSize: 2,
+    cleanupRegionSize: 0,
     detailPriority: true,
     sourceMode: 'original',
-    renderProfile: 'balanced',
-    structureStrength: 0.6,
+    renderProfile: 'simple',
+    structureStrength: 0,
     subjectEnhancement: 'local',
   };
 }

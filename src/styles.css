@@ -491,6 +491,28 @@ input[type="range"] {
   font-size: 10px;
 }
 
+.mvp-engine-card {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 10px;
+  padding: 10px;
+  color: #38404a;
+  background: #f4f1eb;
+  border: 1px solid var(--line);
+  line-height: 1.5;
+}
+
+.mvp-engine-card strong {
+  color: #20242b;
+  font-size: 11px;
+}
+
+.mvp-engine-card span {
+  color: var(--muted);
+  font-size: 9px;
+}
+
 .detail-priority-toggle {
   display: grid;
   grid-template-columns: 18px 1fr;

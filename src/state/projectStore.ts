@@ -241,7 +241,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       ...project.settings,
       fit: 'crop' as const,
       detailPriority: project.settings.detailPriority ?? true,
-      minimumPaletteDistance: project.settings.minimumPaletteDistance ?? 4,
+      minimumPaletteDistance: project.settings.minimumPaletteDistance ?? 0,
+      cleanupRegionSize: project.settings.cleanupRegionSize ?? 0,
+      renderProfile: project.settings.renderProfile ?? 'simple',
+      structureStrength: project.settings.structureStrength ?? 0,
       subjectEnhancement: project.settings.subjectEnhancement ?? 'local',
     };
     const cells = decodeCellsRle(project.cellsRle, settings.grid.columns * settings.grid.rows);

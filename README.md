@@ -15,6 +15,8 @@ npm install
 npm run dev
 ```
 
+macOS 用户也可以双击项目目录中的 `start.command` 一键启动。脚本会自动检查依赖、启动本地开发服务器并打开 `http://127.0.0.1:5174/`。
+
 常用质量检查：
 
 ```bash

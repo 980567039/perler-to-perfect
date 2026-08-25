@@ -1,7 +1,8 @@
 /// <reference lib="webworker" />
 
-import { GENERATION_SAMPLE_SCALE, GenerationCancelledError, generatePattern } from '../domain/generation';
+import { GENERATION_SAMPLE_SCALE, GenerationCancelledError } from '../domain/generation';
 import { fitWithinFrame } from '../domain/framing';
+import { generateMvpPattern } from '../domain/mvpGeneration';
 import type { GenerateRequest, GenerateResponse, GenerationSettings } from '../domain/types';
 
 const workerScope: DedicatedWorkerGlobalScope = self as unknown as DedicatedWorkerGlobalScope;
@@ -76,17 +77,17 @@ workerScope.onmessage = (event: MessageEvent<GenerateRequest>) => {
     return;
   }
 
-  const { jobId, bitmap, palette, settings } = request;
+  const { jobId, bitmap, sampledImage, palette, settings } = request;
   cancelledJobs.delete(jobId);
   try {
     post({ type: 'PROGRESS', jobId, stage: 'prepare', completed: 0, total: 1 });
-    const sampledImage = drawSampledImage(bitmap, settings);
-    bitmap.close();
+    const preparedImage = sampledImage ?? (bitmap ? drawSampledImage(bitmap, settings) : null);
+    if (!preparedImage) throw new Error('生成任务缺少输入图像。');
+    if (bitmap) bitmap.close();
     post({ type: 'PROGRESS', jobId, stage: 'prepare', completed: 1, total: 1 });
-    const result = generatePattern(sampledImage, palette, settings, {
+    const result = generateMvpPattern(preparedImage, palette, settings, {
       isCancelled: () => cancelledJobs.has(jobId),
       onProgress: (progress) => post({ type: 'PROGRESS', jobId, ...progress }),
-      subjectHints: request.subjectHints,
     });
     const cellsBuffer = result.cells.buffer as ArrayBuffer;
     const confidenceBuffer = result.diagnostics?.confidence.buffer as ArrayBuffer | undefined;
@@ -111,7 +112,7 @@ workerScope.onmessage = (event: MessageEvent<GenerateRequest>) => {
       confidenceBuffer ? [cellsBuffer, confidenceBuffer] : [cellsBuffer],
     );
   } catch (error) {
-    bitmap.close();
+    bitmap?.close();
     const cancelled = error instanceof GenerationCancelledError || cancelledJobs.has(jobId);
     post({
       type: 'ERROR',

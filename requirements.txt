@@ -1,0 +1,6 @@
+numpy>=1.23
+perfect-pixel==0.1.4
+Pillow>=9.0
+
+# Optional accelerator used automatically by perfect-pixel when installed.
+# opencv-python>=4.8

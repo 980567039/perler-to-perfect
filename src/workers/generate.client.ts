@@ -3,7 +3,6 @@ import type {
   GenerationSettings,
   PaletteManifest,
   PatternResult,
-  SubjectHints,
 } from '../domain/types';
 
 export interface GenerationTask {
@@ -11,35 +10,60 @@ export interface GenerationTask {
   cancel: () => void;
 }
 
+export interface GenerationOptions {
+  /** Kept for RedInk callers compiled against the previous API; mvp runs locally. */
+  sourceBlob?: Blob;
+}
+
 export function startGeneration(
   bitmap: ImageBitmap,
   palette: PaletteManifest,
   settings: GenerationSettings,
   onProgress: (message: Extract<GenerateResponse, { type: 'PROGRESS' }>) => void,
-  subjectHints?: SubjectHints,
+  _subjectHints?: never,
+  _options: GenerationOptions = {},
 ): GenerationTask {
-  const worker = new Worker(new URL('./generate.worker.ts', import.meta.url), { type: 'module' });
-  const jobId = crypto.randomUUID();
+  const workerJobId = crypto.randomUUID();
   let settled = false;
+  let worker: Worker | null = null;
   let rejectTask: ((reason?: unknown) => void) | null = null;
+  let resolveTask: ((result: PatternResult) => void) | null = null;
+  let bitmapAvailable = true;
+
+  const closeBitmap = () => {
+    if (!bitmapAvailable) return;
+    bitmapAvailable = false;
+    bitmap.close();
+  };
 
   const promise = new Promise<PatternResult>((resolve, reject) => {
+    resolveTask = resolve;
     rejectTask = reject;
+  });
+
+  const startWorker = (sampledImage?: ImageData) => {
+    if (settled) return;
+    worker = new Worker(new URL('./generate.worker.ts', import.meta.url), { type: 'module' });
     worker.onmessage = (event: MessageEvent<GenerateResponse>) => {
       const message = event.data;
-      if (message.jobId !== jobId) return;
+      if (message.jobId !== workerJobId) return;
       if (message.type === 'PROGRESS') {
         onProgress(message);
         return;
       }
       settled = true;
-      worker.terminate();
-      rejectTask = null;
+      worker?.terminate();
+      worker = null;
       if (message.type === 'ERROR') {
-        reject(new Error(message.message));
+        const reject = rejectTask;
+        rejectTask = null;
+        resolveTask = null;
+        // The Worker owns bitmap/sample buffers after postMessage; only the
+        // original bitmap that was not transferred is closed by this client.
+        reject?.(new Error(message.message));
         return;
       }
-      resolve({
+      const result: PatternResult = {
         grid: message.grid,
         cells: new Uint16Array(message.cells),
         counts: message.counts,
@@ -53,25 +77,45 @@ export function startGeneration(
               noiseScore: message.diagnostics.noiseScore,
             }
           : undefined,
-      });
+      };
+      resolveTask?.(result);
+      resolveTask = null;
     };
     worker.onerror = (event) => {
       settled = true;
-      worker.terminate();
+      worker?.terminate();
+      worker = null;
+      const reject = rejectTask;
       rejectTask = null;
-      reject(new Error(event.message || '生成 Worker 发生错误。'));
+      resolveTask = null;
+      reject?.(new Error(event.message || '生成 Worker 发生错误。'));
     };
-    worker.postMessage({ type: 'GENERATE', jobId, bitmap, palette, settings, subjectHints }, [bitmap]);
-  });
+
+    const payload = sampledImage
+      ? { type: 'GENERATE' as const, jobId: workerJobId, sampledImage, palette, settings }
+      : { type: 'GENERATE' as const, jobId: workerJobId, bitmap, palette, settings };
+    const transfer: Transferable[] = sampledImage
+      ? [sampledImage.data.buffer as ArrayBuffer]
+      : [bitmap];
+    worker.postMessage(payload, transfer);
+    if (!sampledImage) bitmapAvailable = false;
+  };
+
+  onProgress({ type: 'PROGRESS', jobId: workerJobId, stage: 'prepare', completed: 0, total: 1 });
+  startWorker();
 
   return {
     promise,
     cancel: () => {
       if (settled) return;
       settled = true;
-      worker.terminate();
-      rejectTask?.(new Error('任务已取消。'));
+      worker?.terminate();
+      worker = null;
+      closeBitmap();
+      const reject = rejectTask;
       rejectTask = null;
+      resolveTask = null;
+      reject?.(new Error('任务已取消。'));
     },
   };
 }
