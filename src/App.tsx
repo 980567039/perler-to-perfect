@@ -75,6 +75,8 @@ export function App() {
   const [tool, setTool] = useState<EditorTool>('paint');
   const [visualMode, setVisualMode] = useState<PatternVisualMode>('beads');
   const [showGridOverlay, setShowGridOverlay] = useState(false);
+  const [sourceOverlayEnabled, setSourceOverlayEnabled] = useState(false);
+  const [sourceOverlayOpacity, setSourceOverlayOpacity] = useState(0.32);
   const [isGenerating, setIsGenerating] = useState(false);
   const [generationProgress, setGenerationProgress] = useState({ label: '', completed: 0, total: 1 });
   const [isExporting, setIsExporting] = useState(false);
@@ -621,6 +623,29 @@ export function App() {
               onSelectColor={handlePaletteSelect}
             />
             <span className="toolbar-spacer" />
+            <label className="grid-overlay-toggle source-overlay-toggle" title="显示与当前裁切、缩放、平移对齐的原图参考层">
+              <input
+                type="checkbox"
+                checked={sourceOverlayEnabled}
+                disabled={!sourceBlob}
+                onChange={(event) => setSourceOverlayEnabled(event.target.checked)}
+              />
+              原图叠底
+            </label>
+            {sourceOverlayEnabled ? (
+              <label className="source-overlay-opacity" title="调整原图参考层透明度">
+                <span>透明度</span>
+                <input
+                  type="range"
+                  min="0.1"
+                  max="0.8"
+                  step="0.05"
+                  value={sourceOverlayOpacity}
+                  aria-label="原图叠底透明度"
+                  onChange={(event) => setSourceOverlayOpacity(Number(event.target.value))}
+                />
+              </label>
+            ) : null}
             <label className="grid-overlay-toggle">
               <input
                 type="checkbox"
@@ -650,6 +675,14 @@ export function App() {
                 visualMode={visualMode}
                 showGridOverlay={showGridOverlay}
                 watermarkEnabled={store.watermarkEnabled}
+                sourceBlob={sourceBlob}
+                sourceSettings={{
+                  fit: store.settings.fit,
+                  transform: store.settings.transform,
+                  cropBox: store.settings.cropBox,
+                }}
+                sourceOverlayEnabled={sourceOverlayEnabled}
+                sourceOverlayOpacity={sourceOverlayOpacity}
                 onPaint={store.paintCells}
                 onPickColor={handlePickColor}
                 onMagicWand={handleMagicWand}

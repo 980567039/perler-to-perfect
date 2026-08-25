@@ -18,6 +18,8 @@ export interface DrawPatternOptions {
   watermarkEnabled: boolean;
   showCoordinates?: boolean;
   includeAxes?: boolean;
+  /** Leave empty cells transparent so a reference image can show underneath. */
+  preserveEmptyBackground?: boolean;
 }
 
 export function gridCanvasDimensions(columns: number, rows: number, cellPixels: number) {
@@ -274,7 +276,7 @@ function drawGridOverlay(
 }
 
 export function drawPatternVisual(context: PatternDrawingContext, options: DrawPatternOptions): void {
-  const { cells, fullGrid, palette, startRow, startColumn, rows, columns, cellPixels, visualMode, showGridOverlay, watermarkEnabled, includeAxes } = options;
+  const { cells, fullGrid, palette, startRow, startColumn, rows, columns, cellPixels, visualMode, showGridOverlay, watermarkEnabled, includeAxes, preserveEmptyBackground = false } = options;
   const hasAxes = visualMode === 'grid' && includeAxes === true;
   const left = hasAxes ? Math.max(36, cellPixels * 2) : 0;
   const top = hasAxes ? Math.max(36, cellPixels * 2) : 0;
@@ -283,8 +285,10 @@ export function drawPatternVisual(context: PatternDrawingContext, options: DrawP
   context.imageSmoothingEnabled = visualMode !== 'grid';
   context.textAlign = 'center';
   context.textBaseline = 'middle';
-  context.fillStyle = visualMode === 'grid' ? '#FFFFFF' : visualMode === 'beads' ? BEAD_BOARD_COLOR : '#E8E3DA';
-  context.fillRect(0, 0, hasAxes ? right + left : right, hasAxes ? bottom + top : bottom);
+  if (!preserveEmptyBackground) {
+    context.fillStyle = visualMode === 'grid' ? '#FFFFFF' : visualMode === 'beads' ? BEAD_BOARD_COLOR : '#E8E3DA';
+    context.fillRect(0, 0, hasAxes ? right + left : right, hasAxes ? bottom + top : bottom);
+  }
 
   for (let localRow = 0; localRow < rows; localRow += 1) {
     const globalRow = startRow + localRow;
@@ -294,7 +298,7 @@ export function drawPatternVisual(context: PatternDrawingContext, options: DrawP
       const x = left + localColumn * cellPixels;
       const y = top + localRow * cellPixels;
       if (value === EMPTY_CELL) {
-        if (visualMode === 'grid') drawEmptyCell(context, x, y, cellPixels);
+        if (visualMode === 'grid' && !preserveEmptyBackground) drawEmptyCell(context, x, y, cellPixels);
         continue;
       }
       const color = palette.colors[value];

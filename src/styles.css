@@ -1109,6 +1109,24 @@ input[type="range"] {
   color: #aeb8c4;
 }
 
+.source-overlay-toggle {
+  color: #f6c27a;
+}
+
+.source-overlay-opacity {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #9da8b5;
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.source-overlay-opacity input {
+  width: 64px;
+  accent-color: #f7931e;
+}
+
 .stage-summary {
   gap: 8px;
   color: #9da8b5;
@@ -1722,6 +1740,14 @@ input[type="range"] {
   .grid-overlay-toggle {
     gap: 0;
     font-size: 0;
+  }
+
+  .source-overlay-opacity span {
+    display: none;
+  }
+
+  .source-overlay-opacity input {
+    width: 42px;
   }
 
   .stage-summary {

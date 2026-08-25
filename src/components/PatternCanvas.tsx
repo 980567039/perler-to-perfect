@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { EMPTY_CELL, type GridSize, type PaletteManifest, type PatternVisualMode } from '../domain/types';
+import { EMPTY_CELL, type GenerationSettings, type GridSize, type PaletteManifest, type PatternVisualMode } from '../domain/types';
 import { drawPatternVisual } from '../rendering/patternDrawing';
+import { drawSourceOverlay } from '../rendering/sourceOverlay';
 import { drawWatermark } from '../rendering/watermark';
 
 export type EditorTool = 'paint' | 'eyedropper' | 'wand' | 'lasso' | 'erase' | 'pan';
@@ -20,6 +21,10 @@ interface PatternCanvasProps {
   visualMode: PatternVisualMode;
   showGridOverlay: boolean;
   watermarkEnabled: boolean;
+  sourceBlob: Blob | null;
+  sourceSettings: Pick<GenerationSettings, 'fit' | 'transform' | 'cropBox'>;
+  sourceOverlayEnabled: boolean;
+  sourceOverlayOpacity: number;
   onPaint: (indices: number[], value: number) => void;
   onPickColor: (paletteIndex: number | null) => void;
   onMagicWand: (index: number) => void;
@@ -41,6 +46,10 @@ export function PatternCanvas({
   visualMode,
   showGridOverlay,
   watermarkEnabled,
+  sourceBlob,
+  sourceSettings,
+  sourceOverlayEnabled,
+  sourceOverlayOpacity,
   onPaint,
   onPickColor,
   onMagicWand,
@@ -50,6 +59,7 @@ export function PatternCanvas({
   const [size, setSize] = useState({ width: 800, height: 620 });
   const [viewport, setViewport] = useState<Viewport>({ scale: 10, offsetX: 0, offsetY: 0 });
   const [cursorCell, setCursorCell] = useState<{ row: number; column: number } | null>(null);
+  const [sourceBitmap, setSourceBitmap] = useState<ImageBitmap | null>(null);
   const dragRef = useRef<{
     mode: EditorTool;
     startX: number;
@@ -61,6 +71,27 @@ export function PatternCanvas({
   } | null>(null);
   const previewSet = useMemo(() => new Set(backgroundPreview), [backgroundPreview]);
   const [lassoPath, setLassoPath] = useState<CanvasPoint[]>([]);
+
+  useEffect(() => {
+    let active = true;
+    setSourceBitmap(null);
+    if (!sourceBlob || typeof createImageBitmap === 'undefined') return () => { active = false; };
+    void createImageBitmap(sourceBlob, { imageOrientation: 'from-image' })
+      .then((bitmap) => {
+        if (active) setSourceBitmap(bitmap);
+        else bitmap.close();
+      })
+      .catch(() => {
+        if (active) setSourceBitmap(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [sourceBlob]);
+
+  useEffect(() => () => {
+    sourceBitmap?.close();
+  }, [sourceBitmap]);
 
   const fit = useCallback((overview = false) => {
     const padding = visualMode === 'grid' ? 56 : 32;
@@ -116,6 +147,24 @@ export function PatternCanvas({
     const startRow = Math.max(0, Math.floor(-offsetY / scale));
     const endRow = Math.min(grid.rows, Math.ceil((size.height - offsetY) / scale));
 
+    const showSource = sourceOverlayEnabled && sourceBitmap !== null;
+    if (showSource && sourceBitmap) {
+      context.save();
+      context.translate(offsetX, offsetY);
+      drawSourceOverlay(context, {
+        image: sourceBitmap,
+        imageWidth: sourceBitmap.width,
+        imageHeight: sourceBitmap.height,
+        targetWidth: grid.columns * scale,
+        targetHeight: grid.rows * scale,
+        fit: sourceSettings.fit,
+        transform: sourceSettings.transform,
+        cropBox: sourceSettings.cropBox,
+        opacity: sourceOverlayOpacity,
+      });
+      context.restore();
+    }
+
     context.save();
     context.translate(offsetX + startColumn * scale, offsetY + startRow * scale);
     drawPatternVisual(context, {
@@ -132,6 +181,7 @@ export function PatternCanvas({
       watermarkEnabled: false,
       showCoordinates: false,
       includeAxes: false,
+      preserveEmptyBackground: showSource,
     });
     context.restore();
 
@@ -185,7 +235,7 @@ export function PatternCanvas({
       context.fill();
       context.restore();
     }
-  }, [cells, grid, lassoPath, palette, previewSet, showGridOverlay, size, viewport, visualMode, watermarkEnabled]);
+  }, [cells, grid, lassoPath, palette, previewSet, showGridOverlay, size, sourceBitmap, sourceOverlayEnabled, sourceOverlayOpacity, sourceSettings, viewport, visualMode, watermarkEnabled]);
 
   const eventCell = (event: React.PointerEvent<HTMLCanvasElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
