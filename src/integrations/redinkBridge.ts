@@ -2,6 +2,7 @@ const CHANNEL = 'redink-perler';
 const VERSION = 1 as const;
 const MAX_HANDOFF_BYTES = 25 * 1024 * 1024;
 const MAX_PATTERN_BYTES = 20 * 1024 * 1024;
+const MAX_PREVIEW_BYTES = 10 * 1024 * 1024;
 const ALLOWED_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
 
 export interface RedinkImageContext {
@@ -42,6 +43,10 @@ interface BridgeMessage {
   mimeType?: string;
   pattern?: ArrayBuffer;
   metadata?: PatternMetadata;
+  beads?: ArrayBuffer;
+  beadsMimeType?: string;
+  ironed?: ArrayBuffer;
+  ironedMimeType?: string;
   settings?: RedinkGenerationSettings;
 }
 
@@ -132,7 +137,11 @@ export class RedinkBridge {
     window.removeEventListener('message', this.handleMessage);
   }
 
-  async sendPattern(master: Blob, metadata: PatternMetadata): Promise<void> {
+  async sendPattern(
+    master: Blob,
+    metadata: PatternMetadata,
+    effects: { beads?: Blob; ironed?: Blob } = {},
+  ): Promise<void> {
     if (!this.connected || !this.parentWindow || !this.requestId) {
       throw new Error('当前不是从 RedInk 打开的联动窗口。');
     }
@@ -140,21 +149,39 @@ export class RedinkBridge {
       throw new Error('图纸母版必须是 20MB 以内的 PNG。');
     }
     if (!isValidMetadata(metadata)) throw new Error('图纸元数据无效。');
+    if (effects.beads) this.validatePng(effects.beads, '拼豆实物效果图', MAX_PREVIEW_BYTES);
+    if (effects.ironed) this.validatePng(effects.ironed, '熨烫成品效果图', MAX_PREVIEW_BYTES);
     const pattern = typeof master.arrayBuffer === 'function'
       ? await master.arrayBuffer()
       : await new Response(master).arrayBuffer();
+    const [beads, ironed] = await Promise.all([
+      effects.beads ? this.blobToArrayBuffer(effects.beads) : Promise.resolve(undefined),
+      effects.ironed ? this.blobToArrayBuffer(effects.ironed) : Promise.resolve(undefined),
+    ]);
+    const transfer: Transferable[] = [pattern];
+    const payload: Record<string, unknown> = {
+      channel: CHANNEL,
+      version: VERSION,
+      type: 'PATTERN_READY',
+      requestId: this.requestId,
+      pattern,
+      mimeType: 'image/png',
+      metadata,
+    };
+    if (beads) {
+      payload.beads = beads;
+      payload.beadsMimeType = 'image/png';
+      transfer.push(beads);
+    }
+    if (ironed) {
+      payload.ironed = ironed;
+      payload.ironedMimeType = 'image/png';
+      transfer.push(ironed);
+    }
     this.parentWindow.postMessage(
-      {
-        channel: CHANNEL,
-        version: VERSION,
-        type: 'PATTERN_READY',
-        requestId: this.requestId,
-        pattern,
-        mimeType: 'image/png',
-        metadata,
-      },
+      payload,
       this.redinkOrigin,
-      [pattern],
+      transfer,
     );
   }
 
@@ -193,6 +220,18 @@ export class RedinkBridge {
       { channel: CHANNEL, version: VERSION, type: 'PERLER_ERROR', requestId: this.requestId, message },
       this.redinkOrigin,
     );
+  }
+
+  private async blobToArrayBuffer(image: Blob): Promise<ArrayBuffer> {
+    return typeof image.arrayBuffer === 'function'
+      ? image.arrayBuffer()
+      : new Response(image).arrayBuffer();
+  }
+
+  private validatePng(image: Blob, label: string, maxBytes: number): void {
+    if (!(image instanceof Blob) || image.type !== 'image/png' || image.size === 0 || image.size > maxBytes) {
+      throw new Error(`${label}必须是 ${maxBytes / 1024 / 1024}MB 以内的 PNG。`);
+    }
   }
 }
 

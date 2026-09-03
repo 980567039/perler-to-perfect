@@ -48,7 +48,7 @@ describe('RedInk bridge', () => {
     expect(file.type).toBe('image/png');
   });
 
-  it('returns a PNG master to RedInk', async () => {
+  it('returns the PNG master and optional visual outputs to RedInk', async () => {
     const parent = { postMessage: vi.fn() };
     Object.defineProperty(window, 'opener', { value: parent, configurable: true });
     window.history.replaceState({}, '', '/?handoff=req-2');
@@ -58,12 +58,23 @@ describe('RedInk bridge', () => {
       columns: 104,
       rows: 104,
       usedColors: 40,
+    }, {
+      beads: new Blob(['beads'], { type: 'image/png' }),
+      ironed: new Blob(['ironed'], { type: 'image/png' }),
     });
 
     expect(parent.postMessage).toHaveBeenLastCalledWith(
-      expect.objectContaining({ type: 'PATTERN_READY', requestId: 'req-2', mimeType: 'image/png' }),
+      expect.objectContaining({
+        type: 'PATTERN_READY',
+        requestId: 'req-2',
+        mimeType: 'image/png',
+        beadsMimeType: 'image/png',
+        ironedMimeType: 'image/png',
+        beads: expect.any(ArrayBuffer),
+        ironed: expect.any(ArrayBuffer),
+      }),
       redinkOrigin,
-      expect.arrayContaining([expect.any(ArrayBuffer)]),
+      expect.arrayContaining([expect.any(ArrayBuffer), expect.any(ArrayBuffer), expect.any(ArrayBuffer)]),
     );
   });
 

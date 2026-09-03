@@ -1,5 +1,5 @@
 import { assertCellBuffer } from '../domain/grid';
-import { type GridSize, type PaletteManifest } from '../domain/types';
+import { type GridSize, type PaletteManifest, type PatternVisualMode } from '../domain/types';
 import { drawPatternVisual } from './patternDrawing';
 
 const PREVIEW_LONGEST_SIDE = 1040;
@@ -20,10 +20,11 @@ export function autoPatternPreviewDimensions(grid: GridSize): AutoPatternPreview
   };
 }
 
-export async function renderAutoPatternPreview(input: {
+export async function renderAutoPatternVisual(input: {
   grid: GridSize;
   cells: Uint16Array;
   palette: PaletteManifest;
+  visualMode: Extract<PatternVisualMode, 'beads' | 'ironed'>;
 }): Promise<Blob> {
   assertCellBuffer(input.cells, input.grid, input.palette.colors.length);
   const { cellPixels, width, height } = autoPatternPreviewDimensions(input.grid);
@@ -40,7 +41,7 @@ export async function renderAutoPatternPreview(input: {
     rows: input.grid.rows,
     columns: input.grid.columns,
     cellPixels,
-    visualMode: 'beads',
+    visualMode: input.visualMode,
     showGridOverlay: false,
     watermarkEnabled: false,
   });
@@ -50,4 +51,22 @@ export async function renderAutoPatternPreview(input: {
     throw new Error('自动效果图 PNG 渲染失败。');
   }
   return preview;
+}
+
+/** Render the un-ironed cylindrical-bead representation used by the UI. */
+export async function renderAutoPatternPreview(input: {
+  grid: GridSize;
+  cells: Uint16Array;
+  palette: PaletteManifest;
+}): Promise<Blob> {
+  return renderAutoPatternVisual({ ...input, visualMode: 'beads' });
+}
+
+/** Render the flattened/heat-pressed representation used by the UI. */
+export async function renderAutoPatternIronedPreview(input: {
+  grid: GridSize;
+  cells: Uint16Array;
+  palette: PaletteManifest;
+}): Promise<Blob> {
+  return renderAutoPatternVisual({ ...input, visualMode: 'ironed' });
 }

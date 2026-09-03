@@ -288,11 +288,11 @@ ZIP 内容固定为：
 
 ### 9.1 范围与用户流程
 
-联动只针对系列合集的单张角色图片。RedInk 在图片操作区提供“生成拼豆图纸”按钮；默认流程先填写行数、列数和最大用色数，再通过离屏 iframe 打开携带 `requestId` 的 Perler 自动入口。自动入口返回就绪消息后，RedInk 把原图二进制交给 Perler，并在本页展示生成进度和母版预览，不需要用户切换窗口。预览页仍保留“进入 Perler 精修”，该操作才会打开原有完整工作台。
+联动只针对系列合集的单张角色图片。RedInk 在图片操作区提供“生成拼豆图纸”按钮；默认流程先填写行数、列数和最大用色数，再通过离屏 iframe 打开携带 `requestId` 的 Perler 自动入口。自动入口返回就绪消息后，RedInk 把原图二进制交给 Perler，并在本页展示生成进度以及方格图纸、拼豆实物和熨烫成品三种预览，不需要用户切换窗口。预览页仍保留“进入 Perler 精修”，该操作才会打开原有完整工作台。
 
 RedInk 生成阶段新增“拼豆源图”约束：单主体、主体占画面主要区域、无文字/标题/水印/边框/拼贴、轮廓清晰、有限色、大色块和干净背景。它是供转换使用的源图，不替代正常发布图；用户仍可在 Perler 中裁切、清理背景、保留主体和手动精修。
 
-自动入口收到源图后使用 RedInk 传入的网格与用色上限，首次默认 `104×104`、最多 40 色，并固定启用细节优先、`ΔE 4` 相近色抑制和 2 格低对比清理。最多 40 色仍只是上限，算法会在边际收益不足时提前停止。生成后仅清除一次与边缘连通的主背景色，只渲染并回传母版 PNG，不读写工作台自动保存，也不生成图例、分块 ZIP 或本地下载。进入完整工作台精修后，原有编辑、工程保存和 PNG/ZIP 导出行为保持不变。
+自动入口收到源图后使用 RedInk 传入的网格与用色上限，首次默认 `104×104`、最多 40 色，并固定启用细节优先、`ΔE 4` 相近色抑制和 2 格低对比清理。最多 40 色仍只是上限，算法会在边际收益不足时提前停止。生成后仅清除一次与边缘连通的主背景色，再从同一份网格矩阵渲染并回传方格母版、拼豆实物和熨烫成品 PNG，不读写工作台自动保存，也不生成图例、分块 ZIP 或本地下载。进入完整工作台精修后，原有编辑、工程保存和 PNG/ZIP 导出行为保持不变。
 
 回传后 RedInk 必须显示确认弹窗：“将这张拼豆图纸追加到该子主题的最后一张图片吗？”只有点击确认才持久化。取消、关闭弹窗、Perler 页面关闭、超时或回传校验失败都不能改动历史记录或发布序列。
 
@@ -313,11 +313,13 @@ type PerlerHandoffMessage =
   | {
       channel: 'redink-perler'; version: 1; type: 'PATTERN_READY'; requestId: string;
       pattern: ArrayBuffer; mimeType: 'image/png';
+      beads?: ArrayBuffer; beadsMimeType?: 'image/png';
+      ironed?: ArrayBuffer; ironedMimeType?: 'image/png';
       metadata: { columns: number; rows: number; usedColors: number };
     };
 ```
 
-自动入口使用独立的 `redink-perler-auto`、版本 `1` 协议，消息依次为 `AUTO_READY`、`AUTO_GENERATE`、`AUTO_PROGRESS`、`AUTO_PATTERN_READY` 或 `AUTO_ERROR`。`AUTO_GENERATE` 除原图和来源上下文外，还携带 `columns`、`rows`、`maxUsedColors` 与固定为 `true` 的 `removeBorderBackground`；原有 `redink-perler` 手动协议保持兼容，只为 `IMPORT_IMAGE` 增加可选规格字段。
+自动入口使用独立的 `redink-perler-auto`、版本 `1` 协议，消息依次为 `AUTO_READY`、`AUTO_GENERATE`、`AUTO_PROGRESS`、`AUTO_PATTERN_READY` 或 `AUTO_ERROR`。`AUTO_GENERATE` 除原图和来源上下文外，还携带 `columns`、`rows`、`maxUsedColors` 与固定为 `true` 的 `removeBorderBackground`；`AUTO_PATTERN_READY` 在母版之外回传 `beads` 和 `ironed` 两个同源 PNG，`preview` 仅作为旧 RedInk 的 beads 兼容别名。原有 `redink-perler` 手动协议保持兼容，只为 `IMPORT_IMAGE` 增加可选规格字段。
 
 二进制通过 transferable `ArrayBuffer` 传递，避免 Data URL 额外复制。Perler 仅接受来自允许 RedInk origin、与当前窗口会话匹配且 `requestId` 有效的消息；RedInk 仅接受来自配置 Perler origin、`event.source` 等于其刚打开窗口且 `requestId` 匹配的回传。双方限制 MIME、字节大小、解码像素和超时，并在窗口关闭时清理监听器和待处理请求。交接无需让 Perler 跨域下载 RedInk 的图片，也不需要开放图片目录。
 
@@ -327,9 +329,9 @@ type PerlerHandoffMessage =
 
 后端在单次持久化中完成以下更新，并返回完整、已同步的历史记录：
 
-1. 在 `outline.pages` 尾部增加 `{ type: 'pattern', ... }` 页面，并保存来源图片索引和网格元数据。
+1. 在 `outline.pages` 尾部增加 `{ type: 'pattern', ... }` 页面，并保存来源图片索引、网格元数据以及可选的 `outputs.beads` / `outputs.ironed` 文件名。
 2. 在同一索引的 `images.generated` 尾部追加已保存的图纸文件名，使“页面数 = 图片槽位数”的现有不变量继续成立。
-3. 结果页显式识别 `pattern` 页面类型并关闭普通重生成；历史图库、下载与发布沿用按索引排列的图片槽位，因此会保留图纸在末位且不触发文案生成。
+3. 拼豆实物和熨烫 PNG 作为该页面的附属资源，不额外创建图片槽位；结果页和历史图库可分别查看三种输出。结果页显式识别 `pattern` 页面类型并关闭普通重生成；下载与发布沿用按索引排列的图片槽位，因此会保留图纸在末位且不触发文案生成。
 4. 发布时按原图顺序后附图纸，确保图纸自动成为该子主题的最后一张；未确认的图纸不能出现在历史、下载或发布中。
 
 接口应采用一个专用、经校验的“确认追加图纸”端点，而不是复用通用图片生成或让前端直接改写 `outline`。该端点应当幂等：相同 `recordId + requestId` 的重复提交只返回第一次创建的图纸页，避免网络重试产生两张尾页。

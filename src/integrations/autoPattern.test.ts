@@ -4,6 +4,7 @@ import { EMPTY_CELL, type PatternResult } from '../domain/types';
 import {
   createAutoGenerationSettings,
   decodeAutoSource,
+  limitAutoPalette,
   refineAutoPattern,
   removeAutoBorderBackground,
 } from './autoPattern';
@@ -137,6 +138,34 @@ describe('automatic pattern pipeline helpers', () => {
       expect.objectContaining({ paletteIndex: lightGray, count: 8 }),
       expect.objectContaining({ paletteIndex: black, count: 1 }),
     ]));
+  });
+
+  it('limits direct MVP palette mapping before automatic handoff', () => {
+    const first = paletteIndex('H7');
+    const second = paletteIndex('H9');
+    const third = paletteIndex('H10');
+    const cells = new Uint16Array(3 * 3);
+    cells.set([
+      first, first, first,
+      first, second, second,
+      third, third, third,
+    ]);
+    const result: PatternResult = {
+      ...pattern(3, 3, cells),
+      counts: [
+        { colorId: MARD_STANDARD_221_PALETTE.colors[first]!.id, paletteIndex: first, count: 4 },
+        { colorId: MARD_STANDARD_221_PALETTE.colors[second]!.id, paletteIndex: second, count: 2 },
+        { colorId: MARD_STANDARD_221_PALETTE.colors[third]!.id, paletteIndex: third, count: 3 },
+      ],
+      totalBeads: 9,
+    };
+
+    const limited = limitAutoPalette(result, 2);
+
+    expect(limited.cells).not.toBe(cells);
+    expect(limited.counts.length).toBeLessThanOrEqual(2);
+    expect(limited.totalBeads).toBe(9);
+    expect(limited.cells.every((value) => value === first || value === third)).toBe(true);
   });
 
   it('does not apply isolated-cell refinement to non-104 grids', () => {

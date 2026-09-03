@@ -88,6 +88,56 @@ export function refineAutoPattern(
   return refined;
 }
 
+/**
+ * Keep the automatic bridge's hard colour-count limit even though the MVP
+ * sampler maps directly to the full palette. The editor intentionally keeps
+ * that direct mapping, but an automatic handoff must never return metadata
+ * that RedInk (or the user's requested specification) cannot accept.
+ *
+ * Dominant colours are retained first so large character regions stay stable;
+ * every discarded colour is then mapped to the nearest retained palette
+ * colour in CIEDE2000 space. When a limit is needed, the returned matrix is a
+ * fresh buffer so the original worker result remains untouched.
+ */
+export function limitAutoPalette(result: PatternResult, maxUsedColors: number): PatternResult {
+  if (!Number.isInteger(maxUsedColors) || maxUsedColors < 2 || maxUsedColors > 64) {
+    throw new Error('自动生成的最大用色数无效。');
+  }
+  if (result.counts.length <= maxUsedColors) return result;
+
+  const retained = [...result.counts]
+    .sort((first, second) => second.count - first.count || first.paletteIndex - second.paletteIndex)
+    .slice(0, maxUsedColors)
+    .map((entry) => entry.paletteIndex)
+    .sort((first, second) => first - second);
+  const retainedSet = new Set(retained);
+  const replacement = new Map<number, number>();
+  for (const entry of result.counts) {
+    if (retainedSet.has(entry.paletteIndex)) {
+      replacement.set(entry.paletteIndex, entry.paletteIndex);
+      continue;
+    }
+    let best = retained[0] ?? entry.paletteIndex;
+    let bestDistance = colorDistance(entry.paletteIndex, best);
+    for (const candidate of retained.slice(1)) {
+      const distance = colorDistance(entry.paletteIndex, candidate);
+      if (distance < bestDistance - 1e-9 || (Math.abs(distance - bestDistance) <= 1e-9 && candidate < best)) {
+        best = candidate;
+        bestDistance = distance;
+      }
+    }
+    replacement.set(entry.paletteIndex, best);
+  }
+
+  const cells = result.cells.slice();
+  for (let index = 0; index < cells.length; index += 1) {
+    const value = cells[index];
+    if (value === undefined || value === EMPTY_CELL) continue;
+    cells[index] = replacement.get(value) ?? value;
+  }
+  return recountResult(result, cells);
+}
+
 function isFineGrid(result: PatternResult): boolean {
   return result.grid.columns === AUTO_FINE_GRID_SIDE && result.grid.rows === AUTO_FINE_GRID_SIDE;
 }

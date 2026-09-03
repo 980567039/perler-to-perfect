@@ -414,12 +414,16 @@ export function App() {
       downloadBlob(result.ironed, `${fileStem}-ironed.png`);
       downloadBlob(result.archive, `${fileStem}-png.zip`);
       if (redinkBridge.current?.connected && handoffContext) {
-        await redinkBridge.current.sendPattern(result.grid, {
-          columns: store.settings.grid.columns,
-          rows: store.settings.grid.rows,
-          usedColors: store.counts.length,
-        });
-        setNotice('三种效果图与 ZIP 已生成；方格图纸已回传 RedInk，等待确认后追加到原子主题末尾。');
+        await redinkBridge.current.sendPattern(
+          result.grid,
+          {
+            columns: store.settings.grid.columns,
+            rows: store.settings.grid.rows,
+            usedColors: store.counts.length,
+          },
+          { beads: result.beads, ironed: result.ironed },
+        );
+        setNotice('三种效果图与 ZIP 已生成；三种 PNG 已回传 RedInk，等待确认后保存。');
       } else {
         setNotice('拼豆实物、方格图纸、熨烫成品和分块 ZIP 已生成。');
       }

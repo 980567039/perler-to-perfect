@@ -102,7 +102,7 @@ describe('RedInk automatic bridge', () => {
     );
   });
 
-  it('sends protocol progress plus PNG master and preview with transfer ownership', async () => {
+  it('sends protocol progress plus PNG master, bead and ironed outputs with transfer ownership', async () => {
     const parent = { postMessage: vi.fn() };
     Object.defineProperty(window, 'parent', { value: parent, configurable: true });
     window.history.replaceState({}, '', '/?mode=auto&handoff=auto-1');
@@ -111,7 +111,8 @@ describe('RedInk automatic bridge', () => {
     bridge.sendProgress('refine', 1, 1);
     await bridge.sendPattern(
       new Blob(['master'], { type: 'image/png' }),
-      new Blob(['preview'], { type: 'image/png' }),
+      new Blob(['beads'], { type: 'image/png' }),
+      new Blob(['ironed'], { type: 'image/png' }),
       {
       columns: 104,
       rows: 104,
@@ -129,17 +130,21 @@ describe('RedInk automatic bridge', () => {
         type: 'AUTO_PATTERN_READY',
         requestId: 'auto-1',
         mimeType: 'image/png',
-        previewMimeType: 'image/png',
         pattern: expect.any(ArrayBuffer),
+        beadsMimeType: 'image/png',
+        beads: expect.any(ArrayBuffer),
+        ironedMimeType: 'image/png',
+        ironed: expect.any(ArrayBuffer),
+        previewMimeType: 'image/png',
         preview: expect.any(ArrayBuffer),
         metadata: { columns: 104, rows: 104, usedColors: 12 },
       }),
       redinkOrigin,
-      [expect.any(ArrayBuffer), expect.any(ArrayBuffer)],
+      [expect.any(ArrayBuffer), expect.any(ArrayBuffer), expect.any(ArrayBuffer)],
     );
   });
 
-  it('validates the master and preview PNG independently before posting', async () => {
+  it('validates the master and both effect PNGs independently before posting', async () => {
     const parent = { postMessage: vi.fn() };
     Object.defineProperty(window, 'parent', { value: parent, configurable: true });
     window.history.replaceState({}, '', '/?mode=auto&handoff=auto-1');
@@ -150,13 +155,15 @@ describe('RedInk automatic bridge', () => {
     await expect(bridge.sendPattern(
       new Blob(['jpeg'], { type: 'image/jpeg' }),
       png,
+      png,
       metadata,
     )).rejects.toThrow('图纸母版');
     await expect(bridge.sendPattern(
       png,
+      png,
       new Blob([], { type: 'image/png' }),
       metadata,
-    )).rejects.toThrow('效果预览');
+    )).rejects.toThrow('熨烫成品效果图');
 
     expect(parent.postMessage).not.toHaveBeenCalledWith(
       expect.objectContaining({ type: 'AUTO_PATTERN_READY' }),

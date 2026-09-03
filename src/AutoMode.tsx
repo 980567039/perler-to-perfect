@@ -4,9 +4,15 @@ import { ALGORITHM_VERSION } from './domain/types';
 import {
   createAutoGenerationSettings,
   decodeAutoSource,
+  limitAutoPalette,
+  refineAutoPattern,
+  removeAutoBorderBackground,
 } from './integrations/autoPattern';
 import { RedinkAutoBridge, type RedinkAutoGeneratePayload } from './integrations/redinkAutoBridge';
-import { renderAutoPatternPreview } from './rendering/autoPatternPreview';
+import {
+  renderAutoPatternPreview,
+  renderAutoPatternIronedPreview,
+} from './rendering/autoPatternPreview';
 import { exportMasterPattern } from './workers/export.client';
 import { startGeneration, type GenerationTask } from './workers/generate.client';
 
@@ -49,25 +55,49 @@ export function AutoMode() {
           throw new Error('mvp 生成后没有可用拼豆格，请进入 Perler 工作台手动调整。');
         }
 
-        setStatus('正在渲染效果图和母版…');
-        bridge.sendProgress('render', 0, 2);
-        const preview = await renderAutoPatternPreview({
-          grid: generated.grid,
-          cells: generated.cells,
+        // Keep the automatic handoff deterministic and within the requested
+        // production specification. The MVP sampler deliberately preserves
+        // the full palette for editor fidelity, so the bridge applies the
+        // automatic-only background and colour-limit passes here before all
+        // three PNGs are rendered from the same cell matrix.
+        bridge.sendProgress('background', 0, 1);
+        const backgroundCleaned = payload.settings.removeBorderBackground
+          ? removeAutoBorderBackground(generated)
+          : generated;
+        bridge.sendProgress('background', 1, 1);
+        bridge.sendProgress('refine', 0, 1);
+        const refined = refineAutoPattern(
+          limitAutoPalette(backgroundCleaned, payload.settings.maxUsedColors),
+          payload.settings.maxUsedColors,
+          payload.settings.profile ?? 'balanced',
+        );
+        bridge.sendProgress('refine', 1, 1);
+
+        setStatus('正在渲染拼豆效果图、熨烫效果图和母版…');
+        bridge.sendProgress('render', 0, 3);
+        const beads = await renderAutoPatternPreview({
+          grid: refined.grid,
+          cells: refined.cells,
           palette: MARD_STANDARD_221_PALETTE,
         });
-        bridge.sendProgress('render', 1, 2);
+        bridge.sendProgress('render', 1, 3);
+        const ironed = await renderAutoPatternIronedPreview({
+          grid: refined.grid,
+          cells: refined.cells,
+          palette: MARD_STANDARD_221_PALETTE,
+        });
+        bridge.sendProgress('render', 2, 3);
         const master = await exportMasterPattern({
-          grid: generated.grid,
-          cells: generated.cells,
+          grid: refined.grid,
+          cells: refined.cells,
           palette: MARD_STANDARD_221_PALETTE,
           watermarkEnabled: true,
         });
-        bridge.sendProgress('render', 2, 2);
-        await bridge.sendPattern(master, preview, {
-          columns: generated.grid.columns,
-          rows: generated.grid.rows,
-          usedColors: generated.counts.length,
+        bridge.sendProgress('render', 3, 3);
+        await bridge.sendPattern(master, beads, ironed, {
+          columns: refined.grid.columns,
+          rows: refined.grid.rows,
+          usedColors: refined.counts.length,
           profile: payload.settings.profile ?? 'detail',
           algorithmVersion: ALGORITHM_VERSION,
           sourceKind: payload.settings.sourceKind ?? 'original',

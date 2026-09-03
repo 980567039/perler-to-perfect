@@ -147,13 +147,15 @@ export class RedinkAutoBridge {
     this.post({ type: 'AUTO_PROGRESS', stage, completed, total });
   }
 
-  async sendPattern(master: Blob, preview: Blob, metadata: PatternMetadata): Promise<void> {
+  async sendPattern(master: Blob, beads: Blob, ironed: Blob, metadata: PatternMetadata): Promise<void> {
     this.validatePng(master, '图纸母版', MAX_PATTERN_BYTES);
-    this.validatePng(preview, '效果预览', MAX_PREVIEW_BYTES);
+    this.validatePng(beads, '拼豆实物效果图', MAX_PREVIEW_BYTES);
+    this.validatePng(ironed, '熨烫成品效果图', MAX_PREVIEW_BYTES);
     if (!isValidMetadata(metadata)) throw new Error('图纸元数据无效。');
-    const [pattern, previewBuffer] = await Promise.all([
+    const [pattern, beadsBuffer, ironedBuffer] = await Promise.all([
       this.blobToArrayBuffer(master),
-      this.blobToArrayBuffer(preview),
+      this.blobToArrayBuffer(beads),
+      this.blobToArrayBuffer(ironed),
     ]);
     this.post(
       {
@@ -161,11 +163,18 @@ export class RedinkAutoBridge {
         protocolVersion: FEATURE_PROTOCOL_VERSION,
         pattern,
         mimeType: 'image/png',
-        preview: previewBuffer,
+        // `preview` is retained as a compatibility alias for RedInk builds
+        // that predate the explicit three-output contract. It points to the
+        // same transferable as `beads`, so it does not duplicate the payload.
+        beads: beadsBuffer,
+        beadsMimeType: 'image/png',
+        preview: beadsBuffer,
         previewMimeType: 'image/png',
+        ironed: ironedBuffer,
+        ironedMimeType: 'image/png',
         metadata,
       },
-      [pattern, previewBuffer],
+      [pattern, beadsBuffer, ironedBuffer],
     );
   }
 
