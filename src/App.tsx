@@ -9,8 +9,10 @@ import {
   MAX_SOURCE_BYTES,
   MAX_SOURCE_PIXELS,
   type GenerateResponse,
+  type PatternResult,
   type PatternVisualMode,
 } from './domain/types';
+import { countCells } from './domain/grid';
 import { MARD_STANDARD_221_PALETTE } from './domain/mardPalette';
 import { paletteFromFileContents } from './domain/palette';
 import { loadMostRecentProject, saveProject } from './persistence/database';
@@ -239,7 +241,6 @@ export function App() {
   const handleRedinkImport = async (payload: RedinkImportPayload) => {
     await handleImageFile(payload.image);
     setHandoffContext(payload.context);
-    autoGenerateAfterImport.current = true;
     const settings = payload.settings ?? { columns: 104, rows: 104, maxUsedColors: 40 };
     setNotice(
       `已从 RedInk 接收拼豆源图，正在按 ${settings.columns}×${settings.rows} 使用 mvp 规则生成。`,
@@ -251,6 +252,33 @@ export function App() {
       detailPriority: true,
       cleanupRegionSize: 2,
     });
+
+    if (payload.cells && payload.metadata) {
+      const grid = { columns: payload.metadata.columns, rows: payload.metadata.rows };
+      const cells = new Uint16Array(payload.cells);
+      if (cells.length !== grid.columns * grid.rows || cells.some((cell) => cell !== 0xffff && cell >= MARD_STANDARD_221_PALETTE.colors.length)) {
+        throw new Error('RedInk 传入的网格数据无效。');
+      }
+      const { counts, totalBeads } = countCells(cells, grid, MARD_STANDARD_221_PALETTE);
+      if (counts.length === 0) throw new Error('RedInk 传入的图纸没有可用拼豆格。');
+      const imported: PatternResult = {
+        grid,
+        cells,
+        counts,
+        totalBeads,
+        selectedPaletteIndices: counts.map((entry) => entry.paletteIndex),
+      };
+      autoGenerateAfterImport.current = false;
+      store.setPattern(imported);
+      const firstUsed = imported.selectedPaletteIndices[0];
+      if (firstUsed !== undefined) setSelectedPaletteIndex(firstUsed);
+      setNotice(
+        `已从 RedInk 接收已生成图纸：${grid.columns}×${grid.rows}，${counts.length} 色。可在此继续细调后导出。`,
+      );
+      return;
+    }
+
+    autoGenerateAfterImport.current = true;
   };
 
   useEffect(() => {
@@ -422,6 +450,7 @@ export function App() {
             usedColors: store.counts.length,
           },
           { beads: result.beads, ironed: result.ironed },
+          store.cells,
         );
         setNotice('三种效果图与 ZIP 已生成；三种 PNG 已回传 RedInk，等待确认后保存。');
       } else {

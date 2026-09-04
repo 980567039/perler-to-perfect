@@ -78,6 +78,56 @@ describe('RedInk bridge', () => {
     );
   });
 
+  it('returns the edited cell matrix with the three visual outputs', async () => {
+    const parent = { postMessage: vi.fn() };
+    Object.defineProperty(window, 'opener', { value: parent, configurable: true });
+    window.history.replaceState({}, '', '/?handoff=req-cells');
+    bridge = new RedinkBridge(() => undefined);
+    const cells = new Uint16Array(4);
+    cells[0] = 0;
+    cells[1] = 0xffff;
+
+    await bridge.sendPattern(
+      new Blob(['png'], { type: 'image/png' }),
+      { columns: 2, rows: 2, usedColors: 1 },
+      {
+        beads: new Blob(['beads'], { type: 'image/png' }),
+        ironed: new Blob(['ironed'], { type: 'image/png' }),
+      },
+      cells,
+    );
+
+    const [, origin, transfer] = parent.postMessage.mock.calls.at(-1) ?? [];
+    const payload = parent.postMessage.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+    expect(origin).toBe(redinkOrigin);
+    expect(payload).toEqual(expect.objectContaining({
+      type: 'PATTERN_READY',
+      grid: { columns: 2, rows: 2 },
+      cells: expect.any(ArrayBuffer),
+    }));
+    expect([...new Uint16Array(payload.cells as ArrayBuffer)]).toEqual([...cells]);
+    expect(transfer).toEqual(expect.arrayContaining([expect.any(ArrayBuffer)]));
+  });
+
+  it('rejects an edited matrix whose values are outside the bundled palette', async () => {
+    const parent = { postMessage: vi.fn() };
+    Object.defineProperty(window, 'opener', { value: parent, configurable: true });
+    window.history.replaceState({}, '', '/?handoff=req-invalid-cells');
+    bridge = new RedinkBridge(() => undefined);
+
+    await expect(bridge.sendPattern(
+      new Blob(['png'], { type: 'image/png' }),
+      { columns: 2, rows: 2, usedColors: 1 },
+      {},
+      new Uint16Array([221, 0, 0, 0]),
+    )).rejects.toThrow('未知色板索引');
+    expect(parent.postMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'PATTERN_READY' }),
+      redinkOrigin,
+      expect.any(Array),
+    );
+  });
+
   it('normalizes a trailing slash in the configured origin', () => {
     vi.stubEnv('VITE_REDINK_ORIGIN', `${redinkOrigin}/`);
     Object.defineProperty(window, 'opener', { value: { postMessage: vi.fn() }, configurable: true });

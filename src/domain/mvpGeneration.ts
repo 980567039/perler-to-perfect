@@ -315,11 +315,17 @@ function nearestPaletteIndex(rgb: RgbColor, paletteLabs: Array<OklabColor | null
 }
 
 function targetDimensions(grid: GridSize, aspectRatio: number): { width: number; height: number; x: number; y: number } {
-  const maxWidth = Math.max(1, grid.columns - 2);
-  const maxHeight = Math.max(1, grid.rows - 2);
-  // mvp's 104×104 default uses 94 content rows. Keep the same two-cell
-  // production margin while scaling naturally for non-square boards.
-  let height = Math.max(1, Math.min(maxHeight, grid.rows - 10));
+  // Keep one empty cell around the design so the first bead never touches the
+  // board edge. The previous centered placement left five empty rows around
+  // the common 104×104 design, making it harder to align the printed sheet
+  // with the physical board. Production sheets are now anchored at (1, 1)
+  // and use all remaining cells; any aspect-ratio remainder stays on the
+  // right/bottom instead of shifting the artwork away from the origin.
+  const marginX = grid.columns > 2 ? 1 : 0;
+  const marginY = grid.rows > 2 ? 1 : 0;
+  const maxWidth = Math.max(1, grid.columns - marginX * 2);
+  const maxHeight = Math.max(1, grid.rows - marginY * 2);
+  let height = maxHeight;
   let width = Math.max(1, Math.round(height * aspectRatio));
   if (width > maxWidth) {
     width = maxWidth;
@@ -328,8 +334,8 @@ function targetDimensions(grid: GridSize, aspectRatio: number): { width: number;
   return {
     width,
     height,
-    x: Math.floor((grid.columns - width) / 2),
-    y: Math.floor((grid.rows - height) / 2),
+    x: marginX,
+    y: marginY,
   };
 }
 

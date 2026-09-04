@@ -58,6 +58,17 @@ function framedSource(): ImageData {
 }
 
 describe('mvp generation', () => {
+  it('anchors the generated subject to the top-left with a one-cell safety margin', () => {
+    const result = generateMvpPattern(framedSource(), palette, settings(20, 20));
+    const occupied = [...result.cells]
+      .map((value, index) => ({ value, index }))
+      .filter(({ value }) => value !== 0xffff);
+
+    expect(occupied.length).toBeGreaterThan(0);
+    expect(Math.min(...occupied.map(({ index }) => Math.floor(index / 20)))).toBe(1);
+    expect(Math.min(...occupied.map(({ index }) => index % 20))).toBe(1);
+  });
+
   it('keeps the mvp foreground, aspect-fit and nearest-color behavior', () => {
     const result = generateMvpPattern(framedSource(), palette, settings(20, 20));
 
@@ -77,4 +88,3 @@ describe('mvp generation', () => {
     expect(result.selectedPaletteIndices).toEqual(result.counts.map((entry) => entry.paletteIndex));
   });
 });
-

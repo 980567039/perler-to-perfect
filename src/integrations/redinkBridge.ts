@@ -4,6 +4,7 @@ const MAX_HANDOFF_BYTES = 25 * 1024 * 1024;
 const MAX_PATTERN_BYTES = 20 * 1024 * 1024;
 const MAX_PREVIEW_BYTES = 10 * 1024 * 1024;
 const ALLOWED_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
+const PALETTE_SIZE = 221;
 
 export interface RedinkImageContext {
   recordId: string;
@@ -22,6 +23,9 @@ export interface RedinkImportPayload {
   context: RedinkImageContext;
   image: File;
   settings?: RedinkGenerationSettings;
+  /** Existing grid returned by RedInk when opening an already generated pattern. */
+  cells?: ArrayBuffer;
+  metadata?: PatternMetadata;
 }
 
 export interface PatternMetadata {
@@ -41,6 +45,8 @@ interface BridgeMessage {
   context?: RedinkImageContext;
   image?: ArrayBuffer;
   mimeType?: string;
+  cells?: ArrayBuffer;
+  grid?: { columns?: unknown; rows?: unknown };
   pattern?: ArrayBuffer;
   metadata?: PatternMetadata;
   beads?: ArrayBuffer;
@@ -104,6 +110,21 @@ function isBridgeMessage(value: unknown): value is BridgeMessage {
   return message.channel === CHANNEL && message.version === VERSION && typeof message.type === 'string';
 }
 
+function isValidImportedCells(value: unknown, metadata: PatternMetadata, grid: BridgeMessage['grid']): value is ArrayBuffer {
+  if (!(value instanceof ArrayBuffer)) return false;
+  if (value.byteLength !== metadata.columns * metadata.rows * Uint16Array.BYTES_PER_ELEMENT) return false;
+  if (grid !== undefined && (
+    !Number.isInteger(grid.columns)
+    || !Number.isInteger(grid.rows)
+    || grid.columns !== metadata.columns
+    || grid.rows !== metadata.rows
+  )) return false;
+  // MARD's bundled palette has 221 entries. EMPTY_CELL (0xffff) is the only
+  // value outside that range allowed in an imported matrix.
+  const cells = new Uint16Array(value);
+  return Array.from(cells).every((cell) => cell === 0xffff || cell < 221);
+}
+
 export class RedinkBridge {
   readonly requestId: string | null;
   readonly connected: boolean;
@@ -141,6 +162,7 @@ export class RedinkBridge {
     master: Blob,
     metadata: PatternMetadata,
     effects: { beads?: Blob; ironed?: Blob } = {},
+    cells?: Uint16Array,
   ): Promise<void> {
     if (!this.connected || !this.parentWindow || !this.requestId) {
       throw new Error('当前不是从 RedInk 打开的联动窗口。');
@@ -149,11 +171,21 @@ export class RedinkBridge {
       throw new Error('图纸母版必须是 20MB 以内的 PNG。');
     }
     if (!isValidMetadata(metadata)) throw new Error('图纸元数据无效。');
+    if (cells) {
+      if (cells.length !== metadata.columns * metadata.rows) {
+        throw new Error('图纸网格数据长度与元数据不一致。');
+      }
+      if (Array.from(cells).some((cell) => cell !== 0xffff && cell >= PALETTE_SIZE)) {
+        throw new Error('图纸网格数据包含未知色板索引。');
+      }
+    }
     if (effects.beads) this.validatePng(effects.beads, '拼豆实物效果图', MAX_PREVIEW_BYTES);
     if (effects.ironed) this.validatePng(effects.ironed, '熨烫成品效果图', MAX_PREVIEW_BYTES);
     const pattern = typeof master.arrayBuffer === 'function'
       ? await master.arrayBuffer()
       : await new Response(master).arrayBuffer();
+    const matrix = cells ? cells.slice() : null;
+    const matrixBuffer = matrix ? matrix.buffer as ArrayBuffer : null;
     const [beads, ironed] = await Promise.all([
       effects.beads ? this.blobToArrayBuffer(effects.beads) : Promise.resolve(undefined),
       effects.ironed ? this.blobToArrayBuffer(effects.ironed) : Promise.resolve(undefined),
@@ -168,6 +200,11 @@ export class RedinkBridge {
       mimeType: 'image/png',
       metadata,
     };
+    if (matrixBuffer) {
+      payload.cells = matrixBuffer;
+      payload.grid = { columns: metadata.columns, rows: metadata.rows };
+      transfer.push(matrixBuffer);
+    }
     if (beads) {
       payload.beads = beads;
       payload.beadsMimeType = 'image/png';
@@ -189,7 +226,7 @@ export class RedinkBridge {
     if (this.disposed || !this.connected || event.source !== this.parentWindow || event.origin !== this.redinkOrigin) return;
     if (!isBridgeMessage(event.data)) return;
     const message = event.data;
-    if (message.requestId !== this.requestId || message.type !== 'IMPORT_IMAGE') return;
+    if (message.requestId !== this.requestId || !['IMPORT_IMAGE', 'IMPORT_PATTERN'].includes(message.type)) return;
     if (!(message.image instanceof ArrayBuffer) || message.image.byteLength === 0 || message.image.byteLength > MAX_HANDOFF_BYTES) {
       this.sendError('图片文件无效或超过 25MB。');
       return;
@@ -202,6 +239,14 @@ export class RedinkBridge {
       this.sendError('图纸规格无效；行列必须为 1–300，最大用色数必须为 2–64。');
       return;
     }
+    const isPatternImport = message.type === 'IMPORT_PATTERN';
+    if (isPatternImport && (
+      !isValidMetadata(message.metadata)
+      || !isValidImportedCells(message.cells, message.metadata, message.grid)
+    )) {
+      this.sendError('已有图纸的网格数据无效或与元数据不一致。');
+      return;
+    }
     const fileName = message.context.fileName.replace(/[\\/:*?"<>|]+/g, '-').slice(0, 120) || 'redink-source.png';
     const file = new File([message.image], fileName, { type: message.mimeType });
     void Promise.resolve(this.onImport({
@@ -209,6 +254,7 @@ export class RedinkBridge {
       context: message.context,
       image: file,
       settings: message.settings,
+      ...(isPatternImport ? { cells: message.cells, metadata: message.metadata } : {}),
     })).catch((error: unknown) => {
       this.sendError(error instanceof Error ? error.message : '导入图片失败。');
     });
